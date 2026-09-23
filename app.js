@@ -88,8 +88,24 @@
     return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()];
   }
 
-  function shiftFromHour(hour) {
-    return hour >= 18 || hour < 6 ? "night" : "day";
+  function activeSlot(now) {
+    var mins = now.getHours() * 60 + now.getMinutes();
+    var shiftId = null;
+    if (mins >= 6 * 60 && mins <= 18 * 60) shiftId = "day";
+    else if (mins >= 18 * 60 + 1) shiftId = "night";
+    if (!shiftId) return null;
+    return { day: dayIdFromDate(now), shift: shiftId, date: toISO(now) };
+  }
+
+  function isSlotEditable(dayId, shiftId) {
+    var slot = activeSlot(new Date());
+    if (!slot || slot.shift !== shiftId || slot.day !== dayId) return false;
+    return dateForDay(dayId) === slot.date;
+  }
+
+  function currentShiftId(now) {
+    var slot = activeSlot(now);
+    return slot ? slot.shift : "day";
   }
 
   function dateForDay(dayId) {
@@ -156,7 +172,7 @@
       activeTruckId: null,
       weekStart: toISO(startOfWeek(now)),
       day: dayIdFromDate(now),
-      shift: shiftFromHour(now.getHours()),
+        shift: currentShiftId(now),
       tab: "inspect",
       sheets: {}
     };
@@ -203,7 +219,7 @@
     var dayOk = DAYS.some(function (day) { return day.id === state.day; });
     var shiftOk = SHIFTS.some(function (shift) { return shift.id === state.shift; });
     if (!dayOk) state.day = dayIdFromDate(new Date());
-    if (!shiftOk) state.shift = shiftFromHour(new Date().getHours());
+    if (!shiftOk) state.shift = currentShiftId(new Date());
     if (state.tab !== "inspect" && state.tab !== "sheet") state.tab = "inspect";
     if (!state.sheets || typeof state.sheets !== "object") state.sheets = {};
   }
@@ -323,10 +339,30 @@
     }
   }
 
-  function isTodaySlot(dayId, shiftId) {
+  function lockMessage() {
+    if (isSlotEditable(state.day, state.shift)) {
+      return state.shift === "day"
+        ? "This shift is open. Days run from 6:00 to 18:00."
+        : "This shift is open. Nights run from 18:01 to midnight.";
+    }
     var now = new Date();
-    if (dateForDay(dayId) !== toISO(now)) return false;
-    return shiftId === shiftFromHour(now.getHours());
+    var today = toISO(now);
+    var slotDate = dateForDay(state.day);
+    var slot = activeSlot(now);
+    if (slotDate < today) return "This shift is closed.";
+    if (slotDate > today) return "This shift is not open yet.";
+    if (!slot) return "Checks are closed until 6:00.";
+    if (state.shift === "night") return "Nights open at 18:01.";
+    return "Days are closed for today.";
+  }
+
+  function applyShiftLock() {
+    var editable = !!state.activeTruckId && isSlotEditable(state.day, state.shift);
+    el("mark-all").disabled = !editable;
+    el("clear-shift").disabled = !editable || !readShift();
+    el("shift-date").disabled = !editable;
+    el("shift-initials").disabled = !editable;
+    el("shift-lock").textContent = state.activeTruckId ? lockMessage() : "";
   }
 
   function chipClass(shift) {
@@ -421,7 +457,7 @@
     el("print-meta").textContent = meta;
     el("sheet-sub").textContent = meta;
     el("clear-week-btn").disabled = !(hasTruck && state.sheets[sheetKey()]);
-    el("clear-shift").disabled = !readShift();
+    applyShiftLock();
   }
 
   function renderInitialsList() {
@@ -435,7 +471,8 @@
       return SHIFTS.map(function (shift) {
         var data = readShift(day.id, shift.id);
         var active = day.id === state.day && shift.id === state.shift;
-        var classes = ["chip", chipClass(data), active ? "is-active" : "", isTodaySlot(day.id, shift.id) ? "is-today" : ""];
+        var open = isSlotEditable(day.id, shift.id);
+        var classes = ["chip", chipClass(data), active ? "is-active" : "", open ? "is-today" : "is-closed"];
         return '<button type="button" class="' + classes.filter(Boolean).join(" ") + '" data-day="' + day.id + '" data-shift="' + shift.id + '" aria-pressed="' + (active ? "true" : "false") + '">' +
           '<span class="chip-day">' + day.short + '</span>' +
           '<span class="chip-shift">' + shift.short + '</span>' +
@@ -478,28 +515,31 @@
     progress.classList.toggle("is-done", stats.checked === stats.total && stats.issues === 0 && signed);
   }
 
-  function statusButton(value, label, current) {
+  function statusButton(value, label, current, locked) {
     var pressed = current === value ? "true" : "false";
-    return '<button type="button" data-set="' + value + '" aria-pressed="' + pressed + '">' + label + "</button>";
+    return '<button type="button" data-set="' + value + '" aria-pressed="' + pressed + '"' + (locked ? " disabled" : "") + ">" + label + "</button>";
   }
 
   function renderChecklist() {
     var data = readShift();
-    el("checklist").innerHTML = ITEMS.map(function (item, index) {
+    var locked = !isSlotEditable(state.day, state.shift);
+    var checklist = el("checklist");
+    checklist.classList.toggle("is-locked", locked);
+    checklist.innerHTML = ITEMS.map(function (item, index) {
       var rec = getItem(data, item.id);
       var hint = item.hint ? '<span class="hint">' + esc(item.hint) + "</span>" : "";
       var reading = item.reading
-        ? '<label class="inline-field"><span>' + esc(item.reading) + '</span><input type="text" data-reading="' + item.id + '" maxlength="40" placeholder="Optional" value="' + esc(rec.reading) + '"></label>'
+        ? '<label class="inline-field"><span>' + esc(item.reading) + '</span><input type="text" data-reading="' + item.id + '" maxlength="40" placeholder="Optional" value="' + esc(rec.reading) + '"' + (locked ? " disabled" : "") + "></label>"
         : "";
       var note = rec.status === "issue"
-        ? '<label class="inline-field"><span>Note</span><input type="text" data-note="' + item.id + '" maxlength="180" placeholder="What needs attention?" value="' + esc(rec.note) + '"></label>'
+        ? '<label class="inline-field"><span>Note</span><input type="text" data-note="' + item.id + '" maxlength="180" placeholder="What needs attention?" value="' + esc(rec.note) + '"' + (locked ? " disabled" : "") + "></label>"
         : "";
       return '<div class="check-row' + (rec.status ? " is-" + rec.status : "") + '" data-item="' + item.id + '">' +
         '<div class="check-copy"><span class="check-name"><span class="idx">' + (index + 1) + "</span>" + esc(item.label) + "</span>" + hint + "</div>" +
         '<div class="check-actions" role="group" aria-label="' + esc(item.label) + '">' +
-          statusButton("ok", "OK", rec.status) +
-          statusButton("issue", "Issue", rec.status) +
-          statusButton("na", "N/A", rec.status) +
+          statusButton("ok", "OK", rec.status, locked) +
+          statusButton("issue", "Issue", rec.status, locked) +
+          statusButton("na", "N/A", rec.status, locked) +
         "</div>" +
         reading +
         note +
@@ -510,7 +550,7 @@
   function columnClass(day, shift) {
     var classes = [];
     if (day.id === state.day && shift.id === state.shift) classes.push("is-active");
-    if (isTodaySlot(day.id, shift.id)) classes.push("is-today");
+    classes.push(isSlotEditable(day.id, shift.id) ? "is-today" : "is-closed");
     if (shift.id === "day") classes.push("day-start");
     return classes.join(" ");
   }
@@ -542,9 +582,11 @@
           var bits = [item.label, day.label, shift.label, statusText];
           if (rec.reading) bits.push(rec.reading);
           if (rec.note) bits.push(rec.note);
+          var open = isSlotEditable(day.id, shift.id);
+          if (!open) bits.push("Closed");
           var cellClass = ["cell", rec.status, rec.note ? "has-note" : ""].filter(Boolean).join(" ");
           parts.push(
-            '<td class="' + columnClass(day, shift) + '"><button type="button" class="' + cellClass + '" data-item="' + item.id + '" data-day="' + day.id + '" data-shift="' + shift.id + '" title="' + esc(bits.join(" · ")) + '" aria-label="' + esc(bits.join(", ")) + '">' + symbol + "</button></td>"
+            '<td class="' + columnClass(day, shift) + '"><button type="button" class="' + cellClass + '" data-item="' + item.id + '" data-day="' + day.id + '" data-shift="' + shift.id + '" title="' + esc(bits.join(" · ")) + '" aria-label="' + esc(bits.join(", ")) + '"' + (open ? "" : " disabled") + ">" + symbol + "</button></td>"
           );
         });
       });
@@ -637,6 +679,7 @@
   }
 
   function setItemStatus(itemId, status) {
+    if (!isSlotEditable(state.day, state.shift)) return;
     var prev = getItem(readShift(), itemId);
     if (prev.status === status) return;
     var shift = ensureShift();
@@ -655,6 +698,7 @@
   }
 
   function cycleCell(day, shiftName, itemId) {
+    if (!isSlotEditable(day, shiftName)) return;
     var order = ["", "ok", "issue", "na"];
     var shift = ensureShift(day, shiftName);
     var prev = getItem(shift, itemId);
@@ -678,6 +722,7 @@
   }
 
   function markAllOk() {
+    if (!isSlotEditable(state.day, state.shift)) return;
     var existing = readShift();
     var stats = shiftStats(existing);
     var allOk = stats.checked === stats.total && ITEMS.every(function (item) {
@@ -696,6 +741,7 @@
   }
 
   function clearShift() {
+    if (!isSlotEditable(state.day, state.shift)) return;
     var data = readShift();
     if (!data) return;
     if (!window.confirm("Clear this shift?")) return;
@@ -741,7 +787,7 @@
     paintedSheetKey = null;
     save();
     renderAll();
-    el("shift-initials").focus();
+    if (isSlotEditable(state.day, state.shift)) el("shift-initials").focus();
   }
 
   function deleteTruck(id) {
@@ -769,6 +815,7 @@
   }
 
   function onDateChange() {
+    if (!isSlotEditable(state.day, state.shift)) return;
     var input = el("shift-date");
     var shift = ensureShift();
     shift.date = input.value || dateForDay(state.day);
@@ -780,6 +827,7 @@
   }
 
   function onInitialsInput(event) {
+    if (!isSlotEditable(state.day, state.shift)) return;
     var input = event.target;
     var upper = input.value.toUpperCase();
     if (input.value !== upper) {
@@ -817,6 +865,7 @@
   }
 
   function onChecklistInput(event) {
+    if (!isSlotEditable(state.day, state.shift)) return;
     var itemId = event.target.dataset.note || event.target.dataset.reading;
     if (!itemId) return;
     var shift = ensureShift();
@@ -954,7 +1003,7 @@
       var now = new Date();
       state.weekStart = toISO(startOfWeek(now));
       state.day = dayIdFromDate(now);
-      state.shift = shiftFromHour(now.getHours());
+      state.shift = currentShiftId(now);
       paintedSheetKey = null;
       save();
       renderAll();
@@ -1006,11 +1055,30 @@
     window.addEventListener("beforeprint", syncPrintNotes);
   }
 
+  function slotStamp() {
+    var slot = activeSlot(new Date());
+    return slot ? slot.date + ":" + slot.shift : "closed";
+  }
+
   function init() {
+    var openKey = slotStamp();
     sanitize();
     bind();
     renderAll();
     save();
+    window.setInterval(function () {
+      var next = slotStamp();
+      if (next === openKey) return;
+      openKey = next;
+      if (state.activeTruckId) renderChecks();
+    }, 15000);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState !== "visible") return;
+      var next = slotStamp();
+      if (next === openKey) return;
+      openKey = next;
+      if (state.activeTruckId) renderChecks();
+    });
   }
 
   init();

@@ -329,6 +329,13 @@ textarea {
   color: var(--ok);
 }
 
+.shift-lock {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #8a5a12;
+}
+
 .shift-strip {
   display: flex;
   gap: 6px;
@@ -365,6 +372,10 @@ textarea {
 
 .chip.is-active.is-today {
   box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
+.chip.is-closed:not(.is-active) {
+  color: #6f685e;
 }
 
 .chip-day {
@@ -477,8 +488,18 @@ textarea {
   font-weight: 700;
 }
 
-.check-actions button:hover {
+.check-actions button:hover:not(:disabled) {
   border-color: var(--header);
+}
+
+.check-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.check-actions button:disabled:not([aria-pressed="true"]) {
+  background: #f4f1eb;
+  color: #8a8478;
 }
 
 .check-actions button[aria-pressed="true"][data-set="ok"] {
@@ -701,6 +722,24 @@ textarea {
 
 .cell.has-note {
   box-shadow: inset 0 -3px 0 var(--yellow);
+}
+
+.cell:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.sheet td.is-closed {
+  background: #f7f4ee;
+}
+
+.sheet tbody tr:nth-child(even) td.is-closed {
+  background: #f3efe8;
+}
+
+.sheet td.is-active.is-closed,
+.sheet th.is-active.is-closed {
+  background: #f6f1e4;
 }
 
 .meta-btn {
