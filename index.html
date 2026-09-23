@@ -1,11 +1,130 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document1</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1a1f16">
+  <title>Daily Lift Truck Inspection</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1f16'/%3E%3Cpath d='M8 16l5 5 11-12' fill='none' stroke='%23e2b43a' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    
+  <header class="topbar">
+    <div class="brand">
+      <p class="eyebrow">Lift truck pre-use check</p>
+      <h1>Daily Lift Truck Inspection Sheet</h1>
+    </div>
+    <div class="top-actions no-print">
+      <span id="save-state" class="save-state">Saved on this device</span>
+      <button type="button" id="download-btn" class="btn on-dark">Download week</button>
+      <button type="button" id="print-btn" class="btn on-dark">Print sheet</button>
+    </div>
+  </header>
+
+  <div class="toolbar no-print">
+    <div class="field">
+      <label for="truck-select">Truck make / model</label>
+      <div class="row">
+        <select id="truck-select"></select>
+        <button type="button" id="delete-truck-btn" class="btn ghost danger" title="Remove this truck from this device">Remove</button>
+      </div>
+    </div>
+    <form id="add-truck-form" class="field" autocomplete="off">
+      <label for="new-truck">Add a truck</label>
+      <div class="row">
+        <input id="new-truck" type="text" maxlength="60" placeholder="e.g. Nissan Nomad 50" required>
+        <button type="submit" class="btn">Add</button>
+      </div>
+    </form>
+    <div class="field">
+      <label for="week-input">Week</label>
+      <div class="row">
+        <button type="button" id="prev-week" class="btn ghost icon-btn" aria-label="Previous week">‹</button>
+        <input type="date" id="week-input">
+        <button type="button" id="next-week" class="btn ghost icon-btn" aria-label="Next week">›</button>
+        <button type="button" id="today-btn" class="btn ghost">Today</button>
+      </div>
+      <p id="week-label" class="week-label"></p>
+    </div>
+  </div>
+
+  <p id="print-meta" class="print-only"></p>
+
+  <div id="empty" class="empty" hidden>
+    <h2>Start a sheet for a lift truck</h2>
+    <p>Add the make and model above. Each truck keeps its own weekly inspection record on this device.</p>
+  </div>
+
+  <div id="workspace" class="layout" hidden>
+    <div class="view-tabs no-print" aria-label="View">
+      <button type="button" id="tab-inspect" class="btn ghost" aria-pressed="true">This shift</button>
+      <button type="button" id="tab-sheet" class="btn ghost" aria-pressed="false">Full week</button>
+    </div>
+
+    <section class="inspector" id="inspect-panel" aria-label="Shift inspection">
+      <div class="inspector-sticky">
+        <div class="inspector-head">
+          <h2 id="shift-heading">This shift</h2>
+          <p id="shift-date-label" class="muted"></p>
+          <p id="progress-label" class="progress" aria-live="polite"></p>
+        </div>
+        <div id="shift-strip" class="shift-strip" aria-label="Shifts this week"></div>
+        <div class="shift-meta">
+          <label class="stack slim">
+            <span>Date</span>
+            <input type="date" id="shift-date">
+          </label>
+          <label class="stack slim">
+            <span>Initials</span>
+            <input id="shift-initials" type="text" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC" list="initials-list">
+          </label>
+        </div>
+        <datalist id="initials-list"></datalist>
+        <div class="bulk no-print">
+          <button type="button" id="mark-all" class="btn green">Mark all OK</button>
+          <button type="button" id="clear-shift" class="btn ghost">Clear shift</button>
+        </div>
+      </div>
+      <div id="checklist" class="checklist"></div>
+    </section>
+
+    <section class="sheet-card" id="sheet-panel" aria-label="Weekly sheet">
+      <div class="sheet-head">
+        <div>
+          <h2>Weekly sheet</h2>
+          <p id="sheet-sub" class="muted"></p>
+        </div>
+        <div class="sheet-tools">
+          <p class="legend"><span class="key ok">✓</span> OK <span class="key issue">✗</span> Issue <span class="key na">–</span> N/A</p>
+          <button type="button" id="clear-week-btn" class="btn ghost danger no-print">Clear week</button>
+        </div>
+      </div>
+      <p class="hint-line no-print">Choose a day to open that shift. Click a cell to cycle OK, Issue, and N/A.</p>
+      <div id="sheet-wrap" class="sheet-wrap"></div>
+    </section>
+
+    <section class="notes" aria-label="Remarks and maintenance">
+      <div id="issue-log"></div>
+      <div class="notes-grid">
+        <label class="stack">
+          <span>Remarks</span>
+          <textarea id="remarks" rows="4" placeholder="Anything the next shift should know"></textarea>
+          <div id="print-remarks" class="print-block"></div>
+        </label>
+        <label class="stack">
+          <span>Maintenance required</span>
+          <textarea id="maintenance" rows="4" placeholder="Repairs, parts, or follow-up"></textarea>
+          <div id="print-maintenance" class="print-block"></div>
+        </label>
+      </div>
+    </section>
+  </div>
+
+  <footer class="foot no-print">Records stay in this browser. Print or download a copy if you need the sheet outside this device.</footer>
+  <noscript><p class="empty">This inspection sheet needs JavaScript turned on.</p></noscript>
+  <script src="app.js"></script>
 </body>
 </html>
