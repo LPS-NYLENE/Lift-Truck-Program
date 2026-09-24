@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var ITEMS = [
+  var STANDARD_ITEMS = [
     { id: "fuel", label: "Fuel" },
     { id: "engine-oil", label: "Engine Oil Level" },
     { id: "radiator", label: "Radiator Fluid Level" },
@@ -27,6 +27,26 @@
     { id: "tank-relief", label: "Tank Relief Valve" }
   ];
 
+  var CROWN_ITEMS = [
+    { id: "visible-damage", label: "Visible Damage, dents, broken" },
+    { id: "leaks", label: "Leaks" },
+    { id: "wheels", label: "Wheels Cond. clean" },
+    { id: "forks", label: "Forks" },
+    { id: "emergency-stop", label: "Emergency stop" },
+    { id: "horn-sounds", label: "Horn sounds" },
+    { id: "steering-binding", label: "Steering no binding" },
+    { id: "controls", label: "Controls" },
+    { id: "hour-meter", label: "Hour Meter", reading: "Hours" },
+    { id: "guards", label: "Guards" }
+  ];
+
+  var TRUCKS = [
+    { id: "nissan-nomad-50", name: "Nissan Nomad 50", items: "standard" },
+    { id: "coperion-forklift", name: "Coperion forklift", items: "standard" },
+    { id: "lift-7a284593", name: "Lift truck #7A284593(#24)", items: "crown" },
+    { id: "lift-7a351502", name: "Lift truck #7A351502(#35)", items: "crown" }
+  ];
+
   var DAYS = [
     { id: "mon", label: "Monday", short: "Mon" },
     { id: "tue", label: "Tuesday", short: "Tue" },
@@ -49,7 +69,6 @@
 
   var state = loadState();
   var paintedSheetKey = null;
-  var flashTimer = 0;
   var stripShiftId = "";
 
   function el(id) {
@@ -130,10 +149,6 @@
       .replace(/"/g, "&quot;");
   }
 
-  function uid() {
-    return "t" + Math.random().toString(36).slice(2, 10);
-  }
-
   function emptySheet() {
     return { remarks: "", maintenance: "", shifts: {} };
   }
@@ -143,10 +158,20 @@
   }
 
   function currentTruck() {
-    for (var i = 0; i < state.trucks.length; i += 1) {
-      if (state.trucks[i].id === state.activeTruckId) return state.trucks[i];
+    for (var i = 0; i < TRUCKS.length; i += 1) {
+      if (TRUCKS[i].id === state.activeTruckId) return TRUCKS[i];
     }
-    return null;
+    return TRUCKS[0];
+  }
+
+  function currentItems() {
+    var truck = currentTruck();
+    return truck && truck.items === "crown" ? CROWN_ITEMS : STANDARD_ITEMS;
+  }
+
+  function isCrownTruck() {
+    var truck = currentTruck();
+    return !!(truck && truck.items === "crown");
   }
 
   function loadState() {
@@ -178,22 +203,43 @@
     }
   }
 
-  function sanitize() {
-    if (!Array.isArray(state.trucks)) state.trucks = [];
-    state.trucks = state.trucks.filter(function (truck) {
-      return truck && typeof truck.id === "string" && typeof truck.name === "string" && truck.name.trim();
+  function catalogTruckByName(name) {
+    var normalized = String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+    for (var i = 0; i < TRUCKS.length; i += 1) {
+      if (TRUCKS[i].name.toLowerCase() === normalized) return TRUCKS[i];
+    }
+    return null;
+  }
+
+  function migrateSavedTrucks() {
+    var oldTrucks = Array.isArray(state.trucks) ? state.trucks : [];
+    var sheets = state.sheets && typeof state.sheets === "object" ? state.sheets : {};
+    oldTrucks.forEach(function (truck) {
+      if (!truck || typeof truck.id !== "string") return;
+      var match = catalogTruckByName(truck.name);
+      if (!match || match.id === truck.id) return;
+      Object.keys(sheets).forEach(function (key) {
+        var prefix = truck.id + "::";
+        if (key.indexOf(prefix) !== 0) return;
+        var next = match.id + "::" + key.slice(prefix.length);
+        if (!sheets[next]) sheets[next] = sheets[key];
+        delete sheets[key];
+      });
+      if (state.activeTruckId === truck.id) state.activeTruckId = match.id;
     });
-    state.trucks.forEach(function (truck) {
-      truck.name = truck.name.trim().replace(/\s+/g, " ");
-    });
-    state.trucks.sort(function (a, b) {
-      return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    state.sheets = sheets;
+    state.trucks = TRUCKS.map(function (truck) {
+      return { id: truck.id, name: truck.name };
     });
     var known = false;
-    for (var i = 0; i < state.trucks.length; i += 1) {
-      if (state.trucks[i].id === state.activeTruckId) known = true;
+    for (var i = 0; i < TRUCKS.length; i += 1) {
+      if (TRUCKS[i].id === state.activeTruckId) known = true;
     }
-    if (!known) state.activeTruckId = state.trucks.length ? state.trucks[0].id : null;
+    if (!known) state.activeTruckId = TRUCKS[0].id;
+  }
+
+  function sanitize() {
+    migrateSavedTrucks();
     var parsed = parseISO(state.weekStart);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(state.weekStart || "") || isNaN(parsed.getTime())) {
       state.weekStart = toISO(startOfWeek(new Date()));
@@ -211,20 +257,10 @@
   function save() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      if (!flashTimer) el("save-state").textContent = "Saved on this device";
+      el("save-state").textContent = "Saved on this device";
     } catch (err) {
       el("save-state").textContent = "Could not save in this browser";
     }
-  }
-
-  function flash(message) {
-    var node = el("save-state");
-    node.textContent = message;
-    window.clearTimeout(flashTimer);
-    flashTimer = window.setTimeout(function () {
-      flashTimer = 0;
-      node.textContent = "Saved on this device";
-    }, 2400);
   }
 
   function readSheet() {
@@ -290,18 +326,18 @@
   function shiftStats(shift) {
     var checked = 0;
     var issues = 0;
-    ITEMS.forEach(function (item) {
-      var status = getItem(shift, item.id).status;
-      if (status) checked += 1;
-      if (status === "issue") issues += 1;
+    currentItems().forEach(function (item) {
+      var rec = getItem(shift, item.id);
+      if (rec.status || (item.reading && rec.reading.trim())) checked += 1;
+      if (rec.status === "issue") issues += 1;
     });
-    return { checked: checked, issues: issues, total: ITEMS.length };
+    return { checked: checked, issues: issues, total: currentItems().length };
   }
 
   function hasChecksOrNotes(shift) {
     if (!shift) return false;
     if ((shift.initials || "").trim()) return true;
-    return ITEMS.some(function (item) {
+    return currentItems().some(function (item) {
       var rec = getItem(shift, item.id);
       return rec.status || rec.note.trim() || rec.reading.trim();
     });
@@ -390,7 +426,7 @@
       SHIFTS.forEach(function (shift) {
         var data = sheet.shifts[day.id + "-" + shift.id];
         if (!data) return;
-        ITEMS.forEach(function (item) {
+        currentItems().forEach(function (item) {
           var rec = getItem(data, item.id);
           if (rec.status === "issue") {
             found.push({ day: day, shift: shift, item: item, note: rec.note, reading: rec.reading });
@@ -423,16 +459,7 @@
   function renderTrucks() {
     var select = el("truck-select");
     select.innerHTML = "";
-    if (!state.trucks.length) {
-      var empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "No trucks yet";
-      select.appendChild(empty);
-      select.disabled = true;
-      return;
-    }
-    select.disabled = false;
-    state.trucks.forEach(function (truck) {
+    TRUCKS.forEach(function (truck) {
       var option = document.createElement("option");
       option.value = truck.id;
       option.textContent = truck.name;
@@ -449,9 +476,7 @@
   function renderChrome() {
     var truck = currentTruck();
     var hasTruck = !!truck;
-    el("workspace").hidden = !hasTruck;
-    el("empty").hidden = hasTruck;
-    el("delete-truck-btn").disabled = !hasTruck;
+    el("workspace").hidden = false;
     el("print-btn").disabled = !hasTruck;
     el("download-btn").disabled = !hasTruck;
     document.body.dataset.tab = state.tab;
@@ -470,6 +495,10 @@
     el("shift-date").disabled = !editable;
     el("shift-initials").disabled = !editable;
     el("clear-shift").disabled = !(editable && readShift());
+    var crown = isCrownTruck();
+    el("remarks-label").textContent = crown ? "Comments" : "Remarks";
+    el("remarks").placeholder = crown ? "Comments for this week" : "Anything the next shift should know";
+    el("initials-label").textContent = crown ? "Operator initials" : "Initials";
     renderSheetHint();
   }
 
@@ -557,7 +586,7 @@
   function renderChecklist() {
     var data = readShift();
     var locked = !isLiveDay(state.day);
-    el("checklist").innerHTML = ITEMS.map(function (item, index) {
+    el("checklist").innerHTML = currentItems().map(function (item, index) {
       var rec = getItem(data, item.id);
       var hint = item.hint ? '<span class="hint">' + esc(item.hint) + "</span>" : "";
       var reading = item.reading
@@ -603,20 +632,20 @@
       });
     });
     parts.push("</tr></thead><tbody>");
-    ITEMS.forEach(function (item) {
+    currentItems().forEach(function (item) {
       parts.push('<tr><th class="item-col" scope="row">' + esc(item.label) + "</th>");
       DAYS.forEach(function (day) {
         SHIFTS.forEach(function (shift) {
           var data = readShift(day.id, shift.id);
           var rec = getItem(data, item.id);
           var open = isLiveDay(day.id);
-          var symbol = rec.status === "ok" ? "✓" : rec.status === "issue" ? "✗" : rec.status === "na" ? "–" : "";
+          var symbol = rec.reading ? rec.reading : rec.status === "ok" ? "✓" : rec.status === "issue" ? "✗" : rec.status === "na" ? "–" : "";
           var statusText = rec.status === "ok" ? "OK" : rec.status === "issue" ? "Issue" : rec.status === "na" ? "N/A" : "Not checked";
           var bits = [item.label, day.label, shift.label, statusText];
           if (rec.reading) bits.push(rec.reading);
           if (rec.note) bits.push(rec.note);
           if (!open) bits.push("View only");
-          var cellClass = ["cell", rec.status, rec.note ? "has-note" : "", open ? "is-open" : "is-locked"].filter(Boolean).join(" ");
+          var cellClass = ["cell", rec.status, rec.note ? "has-note" : "", rec.reading ? "has-reading" : "", open ? "is-open" : "is-locked"].filter(Boolean).join(" ");
           parts.push(
             '<td class="' + columnClass(day, shift) + '"><button type="button" class="' + cellClass + '"' + (open ? "" : " disabled") + ' data-item="' + item.id + '" data-day="' + day.id + '" data-shift="' + shift.id + '" title="' + esc(bits.join(" · ")) + '" aria-label="' + esc(bits.join(", ")) + '">' + symbol + "</button></td>"
           );
@@ -624,14 +653,17 @@
       });
       parts.push("</tr>");
     });
-    ["Date", "Initials"].forEach(function (label) {
-      parts.push('<tr class="meta-row"><th class="item-col" scope="row">' + label + "</th>");
+    [
+      { key: "date", label: "Date" },
+      { key: "initials", label: isCrownTruck() ? "Operator initials" : "Initials" }
+    ].forEach(function (meta) {
+      parts.push('<tr class="meta-row"><th class="item-col" scope="row">' + esc(meta.label) + "</th>");
       DAYS.forEach(function (day) {
         SHIFTS.forEach(function (shift) {
           var data = readShift(day.id, shift.id);
           var text = "";
-          if (label === "Date") text = data && data.date ? formatMd(data.date) : "";
-          if (label === "Initials") text = data && data.initials ? data.initials : "";
+          if (meta.key === "date") text = data && data.date ? formatMd(data.date) : "";
+          if (meta.key === "initials") text = data && data.initials ? data.initials : "";
           parts.push(
             '<td class="' + columnClass(day, shift) + '"><button type="button" class="meta-btn" data-open-shift data-day="' + day.id + '" data-shift="' + shift.id + '" aria-label="Open ' + esc(day.label + " " + shift.label) + '">' + esc(text) + "</button></td>"
           );
@@ -757,14 +789,14 @@
     if (!isLiveDay(state.day)) return;
     var existing = readShift();
     var stats = shiftStats(existing);
-    var allOk = stats.checked === stats.total && ITEMS.every(function (item) {
+    var allOk = stats.checked === stats.total && currentItems().every(function (item) {
       return getItem(existing, item.id).status === "ok";
     });
     if (allOk) return;
     if (stats.checked > 0 && !window.confirm("Replace this shift's checks with OK?")) return;
     var shift = ensureShift();
     if (!shift.date) shift.date = dateForDay(state.day);
-    ITEMS.forEach(function (item) {
+    currentItems().forEach(function (item) {
       var prev = getItem(shift, item.id);
       writeItem(shift, item.id, { status: "ok", note: "", reading: prev.reading });
     });
@@ -789,51 +821,6 @@
     var truck = currentTruck();
     if (!window.confirm("Clear the whole week for " + (truck ? truck.name : "this truck") + "?")) return;
     delete state.sheets[sheetKey()];
-    paintedSheetKey = null;
-    save();
-    renderAll();
-  }
-
-  function addTruck(name) {
-    var trimmed = name.trim().replace(/\s+/g, " ");
-    if (!trimmed) return;
-    var existing = null;
-    for (var i = 0; i < state.trucks.length; i += 1) {
-      if (state.trucks[i].name.toLowerCase() === trimmed.toLowerCase()) existing = state.trucks[i];
-    }
-    el("new-truck").value = "";
-    if (existing) {
-      state.activeTruckId = existing.id;
-      paintedSheetKey = null;
-      save();
-      renderAll();
-      flash("That truck is already on the list");
-      return;
-    }
-    var truck = { id: uid(), name: trimmed };
-    state.trucks.push(truck);
-    state.trucks.sort(function (a, b) {
-      return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-    });
-    state.activeTruckId = truck.id;
-    paintedSheetKey = null;
-    save();
-    renderAll();
-    el("shift-initials").focus();
-  }
-
-  function deleteTruck(id) {
-    var truck = null;
-    for (var i = 0; i < state.trucks.length; i += 1) {
-      if (state.trucks[i].id === id) truck = state.trucks[i];
-    }
-    if (!truck) return;
-    if (!window.confirm("Remove " + truck.name + " and its saved sheets from this device?")) return;
-    state.trucks = state.trucks.filter(function (item) { return item.id !== id; });
-    Object.keys(state.sheets).forEach(function (key) {
-      if (key.indexOf(id + "::") === 0) delete state.sheets[key];
-    });
-    state.activeTruckId = state.trucks.length ? state.trucks[0].id : null;
     paintedSheetKey = null;
     save();
     renderAll();
@@ -976,11 +963,11 @@
         lines.push(day.label.toUpperCase() + " " + shift.label.toUpperCase());
         lines.push("Date: " + (data.date || dateForDay(day.id)));
         lines.push("Initials: " + ((data.initials || "").trim() || "—"));
-        ITEMS.forEach(function (item) {
+        currentItems().forEach(function (item) {
           var rec = getItem(data, item.id);
           if (!rec.status && !rec.reading && !rec.note) return;
           lines.push("- " + item.label + ": " + (statusWord(rec.status) || "—"));
-          if (rec.reading) lines.push("  Reading: " + rec.reading);
+          if (rec.reading) lines.push("  " + (item.reading || "Reading") + ": " + rec.reading);
           if (rec.note) lines.push("  Note: " + rec.note);
         });
         lines.push("");
@@ -991,7 +978,7 @@
       lines.push("");
     }
     var sheet = readSheet();
-    lines.push("REMARKS");
+    lines.push(isCrownTruck() ? "COMMENTS" : "REMARKS");
     lines.push((sheet.remarks || "").trim() || "—");
     lines.push("");
     lines.push("MAINTENANCE REQUIRED");
@@ -1015,19 +1002,12 @@
   }
 
   function bind() {
-    el("add-truck-form").addEventListener("submit", function (event) {
-      event.preventDefault();
-      addTruck(el("new-truck").value);
-    });
     el("truck-select").addEventListener("change", function () {
       if (!el("truck-select").value) return;
       state.activeTruckId = el("truck-select").value;
       paintedSheetKey = null;
       save();
       renderAll();
-    });
-    el("delete-truck-btn").addEventListener("click", function () {
-      deleteTruck(state.activeTruckId);
     });
     el("prev-week").addEventListener("click", function () { moveWeek(-7); });
     el("next-week").addEventListener("click", function () { moveWeek(7); });
