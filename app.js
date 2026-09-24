@@ -8,7 +8,7 @@
     { id: "battery", label: "Battery Water Level" },
     { id: "hydraulic-fluid", label: "Hydraulic Fluid Level" },
     { id: "extinguisher", label: "Fire Extinguisher" },
-    { id: "gas-odour", label: "Gas Odour Present", hint: "OK means no odour" },
+    { id: "gas-odour", label: "Gas Odour Present", hint: "Yes means no odour" },
     { id: "tires", label: "Tires" },
     { id: "oil-pressure", label: "Engine Oil Pressure / Temp", reading: "Reading" },
     { id: "ammeter", label: "Ammeter Reading", reading: "Reading" },
@@ -20,10 +20,10 @@
     { id: "steering", label: "Steering" },
     { id: "service-brake", label: "Service Brake" },
     { id: "parking-brake", label: "Parking Brake" },
-    { id: "hydraulic-leaks", label: "Hydraulic Leaks — Cylinders", hint: "OK means no leak" },
+    { id: "hydraulic-leaks", label: "Hydraulic Leaks — Cylinders", hint: "Yes means no leak" },
     { id: "hoses", label: "Hoses / Valves, etc." },
     { id: "overhead-guard", label: "Overhead Guard" },
-    { id: "loose-nuts", label: "Loose Nuts / Bolts / Fittings", hint: "OK means none are loose" },
+    { id: "loose-nuts", label: "Loose Nuts / Bolts / Fittings", hint: "Yes means none are loose" },
     { id: "tank-relief", label: "Tank Relief Valve" }
   ];
 
@@ -559,7 +559,7 @@
     if (document.activeElement !== initials) initials.value = (data && data.initials) || "";
     var stats = shiftStats(data);
     var bits = [stats.checked + " of " + stats.total + " checked"];
-    if (stats.issues) bits.push(stats.issues + (stats.issues === 1 ? " issue" : " issues"));
+    if (stats.issues) bits.push(stats.issues + " marked No");
     if (stats.checked > 0 && !(data && (data.initials || "").trim())) bits.push("initials needed");
     var progress = el("progress-label");
     progress.textContent = bits.join(" · ");
@@ -600,8 +600,8 @@
       return '<div class="check-row' + (rec.status ? " is-" + rec.status : "") + (locked ? " is-locked" : "") + '" data-item="' + item.id + '">' +
         '<div class="check-copy"><span class="check-name"><span class="idx">' + (index + 1) + "</span>" + esc(item.label) + "</span>" + hint + "</div>" +
         '<div class="check-actions" role="group" aria-label="' + esc(item.label) + '">' +
-          statusButton("ok", "OK", rec.status, locked) +
-          statusButton("issue", "Issue", rec.status, locked) +
+          statusButton("ok", "Yes", rec.status, locked) +
+          statusButton("issue", "No", rec.status, locked) +
           statusButton("na", "N/A", rec.status, locked) +
         "</div>" +
         reading +
@@ -641,8 +641,8 @@
           var data = readShift(day.id, shift.id);
           var rec = getItem(data, item.id);
           var open = isLiveDay(day.id);
-          var symbol = rec.reading ? rec.reading : rec.status === "ok" ? "✓" : rec.status === "issue" ? "✗" : rec.status === "na" ? "–" : "";
-          var statusText = rec.status === "ok" ? "OK" : rec.status === "issue" ? "Issue" : rec.status === "na" ? "N/A" : "Not checked";
+          var symbol = rec.reading ? rec.reading : rec.status === "ok" ? "Y" : rec.status === "issue" ? "N" : rec.status === "na" ? "–" : "";
+          var statusText = rec.status === "ok" ? "Yes" : rec.status === "issue" ? "No" : rec.status === "na" ? "N/A" : "Not checked";
           var bits = [item.label, day.label, shift.label, statusText];
           if (rec.reading) bits.push(rec.reading);
           if (rec.note) bits.push(rec.note);
@@ -683,11 +683,10 @@
     var issues = collectIssues();
     var node = el("issue-log");
     if (!issues.length) {
-      node.innerHTML = '<p class="quiet">No issues marked this week.</p>';
+      node.innerHTML = '<p class="quiet">Nothing marked No this week.</p>';
       return;
     }
-    var noun = issues.length === 1 ? "issue" : "issues";
-    node.innerHTML = '<div class="issue-card"><h3>' + issues.length + " " + noun + ' this week</h3><ul>' +
+    node.innerHTML = '<div class="issue-card"><h3>' + issues.length + " marked No this week</h3><ul>" +
       issues.map(function (issue) {
         var detail = issue.note || issue.reading;
         return "<li><button type=\"button\" class=\"linkish\" data-open-shift data-day=\"" + issue.day.id + "\" data-shift=\"" + issue.shift.id + "\">" +
@@ -795,7 +794,7 @@
       return getItem(existing, item.id).status === "ok";
     });
     if (allOk) return;
-    if (stats.checked > 0 && !window.confirm("Replace this shift's checks with OK?")) return;
+    if (stats.checked > 0 && !window.confirm("Replace this shift's checks with Yes?")) return;
     var shift = ensureShift();
     if (!shift.date) shift.date = dateForDay(state.day);
     currentItems().forEach(function (item) {
@@ -869,7 +868,7 @@
     var progressData = readShift();
     var stats = shiftStats(progressData);
     var bits = [stats.checked + " of " + stats.total + " checked"];
-    if (stats.issues) bits.push(stats.issues + (stats.issues === 1 ? " issue" : " issues"));
+    if (stats.issues) bits.push(stats.issues + " marked No");
     if (stats.checked > 0 && !upper.trim()) bits.push("initials needed");
     var progress = el("progress-label");
     progress.textContent = bits.join(" · ");
@@ -933,8 +932,8 @@
   }
 
   function statusWord(status) {
-    if (status === "ok") return "OK";
-    if (status === "issue") return "ISSUE";
+    if (status === "ok") return "YES";
+    if (status === "issue") return "NO";
     if (status === "na") return "N/A";
     return "";
   }
@@ -949,7 +948,7 @@
     ];
     var issues = collectIssues();
     if (issues.length) {
-      lines.push("ISSUES");
+      lines.push("MARKED NO");
       issues.forEach(function (issue) {
         var extra = issue.note || issue.reading;
         lines.push("- " + issue.day.label + " " + issue.shift.label + " · " + issue.item.label + (extra ? " — " + extra : ""));
