@@ -323,10 +323,54 @@
     }
   }
 
-  function isTodaySlot(dayId, shiftId) {
-    var now = new Date();
-    if (dateForDay(dayId) !== toISO(now)) return false;
-    return shiftId === shiftFromHour(now.getHours());
+  function todayISO() {
+    return toISO(new Date());
+  }
+
+  function activeDayId() {
+    var today = todayISO();
+    var start = parseISO(state.weekStart);
+    if (isNaN(start.getTime())) return null;
+    for (var i = 0; i < DAYS.length; i += 1) {
+      if (toISO(addDays(start, i)) === today) return DAYS[i].id;
+    }
+    return null;
+  }
+
+  function activeDayMeta() {
+    var id = activeDayId();
+    if (!id) return null;
+    for (var i = 0; i < DAYS.length; i += 1) {
+      if (DAYS[i].id === id) return DAYS[i];
+    }
+    return null;
+  }
+
+  function isLiveDay(dayId) {
+    return !!dayId && activeDayId() === dayId;
+  }
+
+  var watchedDate = todayISO();
+
+  function catchUpToToday() {
+    var live = activeDayId();
+    if (!live || state.day === live) return false;
+    state.day = live;
+    state.shift = shiftFromHour(new Date().getHours());
+    stripShiftId = "";
+    return true;
+  }
+
+  function watchCalendarDay() {
+    var nowISO = todayISO();
+    if (nowISO === watchedDate) return;
+    watchedDate = nowISO;
+    if (catchUpToToday()) {
+      save();
+      renderAll();
+      return;
+    }
+    renderChecks();
   }
 
   function chipClass(shift) {
@@ -421,7 +465,22 @@
     el("print-meta").textContent = meta;
     el("sheet-sub").textContent = meta;
     el("clear-week-btn").disabled = !(hasTruck && state.sheets[sheetKey()]);
-    el("clear-shift").disabled = !readShift();
+    var editable = hasTruck && isLiveDay(state.day);
+    el("mark-all").disabled = !editable;
+    el("shift-date").disabled = !editable;
+    el("shift-initials").disabled = !editable;
+    el("clear-shift").disabled = !(editable && readShift());
+    renderSheetHint();
+  }
+
+  function renderSheetHint() {
+    var hint = el("sheet-hint");
+    var day = activeDayMeta();
+    if (!day) {
+      hint.textContent = "This week is view only. Open the current week to check today's shifts.";
+      return;
+    }
+    hint.textContent = "Only " + day.label + " can be checked — Days and Nights. Other days are view only.";
   }
 
   function renderInitialsList() {
@@ -435,7 +494,7 @@
       return SHIFTS.map(function (shift) {
         var data = readShift(day.id, shift.id);
         var active = day.id === state.day && shift.id === state.shift;
-        var classes = ["chip", chipClass(data), active ? "is-active" : "", isTodaySlot(day.id, shift.id) ? "is-today" : ""];
+        var classes = ["chip", chipClass(data), active ? "is-active" : "", isLiveDay(day.id) ? "is-live" : ""];
         return '<button type="button" class="' + classes.filter(Boolean).join(" ") + '" data-day="' + day.id + '" data-shift="' + shift.id + '" aria-pressed="' + (active ? "true" : "false") + '">' +
           '<span class="chip-day">' + day.short + '</span>' +
           '<span class="chip-shift">' + shift.short + '</span>' +
@@ -476,30 +535,43 @@
     var signed = !!(data && (data.initials || "").trim());
     progress.classList.toggle("has-issue", stats.issues > 0);
     progress.classList.toggle("is-done", stats.checked === stats.total && stats.issues === 0 && signed);
+    var lock = el("shift-lock");
+    var liveDay = activeDayMeta();
+    if (isLiveDay(state.day)) {
+      lock.hidden = true;
+      lock.textContent = "";
+    } else if (liveDay) {
+      lock.hidden = false;
+      lock.textContent = "View only. " + liveDay.label + " is the active day — only that day's checks can be changed.";
+    } else {
+      lock.hidden = false;
+      lock.textContent = "View only. Checks can be changed on today's shifts in the current week.";
+    }
   }
 
-  function statusButton(value, label, current) {
+  function statusButton(value, label, current, locked) {
     var pressed = current === value ? "true" : "false";
-    return '<button type="button" data-set="' + value + '" aria-pressed="' + pressed + '">' + label + "</button>";
+    return '<button type="button" data-set="' + value + '" aria-pressed="' + pressed + '"' + (locked ? " disabled" : "") + ">" + label + "</button>";
   }
 
   function renderChecklist() {
     var data = readShift();
+    var locked = !isLiveDay(state.day);
     el("checklist").innerHTML = ITEMS.map(function (item, index) {
       var rec = getItem(data, item.id);
       var hint = item.hint ? '<span class="hint">' + esc(item.hint) + "</span>" : "";
       var reading = item.reading
-        ? '<label class="inline-field"><span>' + esc(item.reading) + '</span><input type="text" data-reading="' + item.id + '" maxlength="40" placeholder="Optional" value="' + esc(rec.reading) + '"></label>'
+        ? '<label class="inline-field"><span>' + esc(item.reading) + '</span><input type="text" data-reading="' + item.id + '" maxlength="40" placeholder="Optional" value="' + esc(rec.reading) + '"' + (locked ? " disabled" : "") + "></label>"
         : "";
       var note = rec.status === "issue"
-        ? '<label class="inline-field"><span>Note</span><input type="text" data-note="' + item.id + '" maxlength="180" placeholder="What needs attention?" value="' + esc(rec.note) + '"></label>'
+        ? '<label class="inline-field"><span>Note</span><input type="text" data-note="' + item.id + '" maxlength="180" placeholder="What needs attention?" value="' + esc(rec.note) + '"' + (locked ? " disabled" : "") + "></label>"
         : "";
-      return '<div class="check-row' + (rec.status ? " is-" + rec.status : "") + '" data-item="' + item.id + '">' +
+      return '<div class="check-row' + (rec.status ? " is-" + rec.status : "") + (locked ? " is-locked" : "") + '" data-item="' + item.id + '">' +
         '<div class="check-copy"><span class="check-name"><span class="idx">' + (index + 1) + "</span>" + esc(item.label) + "</span>" + hint + "</div>" +
         '<div class="check-actions" role="group" aria-label="' + esc(item.label) + '">' +
-          statusButton("ok", "OK", rec.status) +
-          statusButton("issue", "Issue", rec.status) +
-          statusButton("na", "N/A", rec.status) +
+          statusButton("ok", "OK", rec.status, locked) +
+          statusButton("issue", "Issue", rec.status, locked) +
+          statusButton("na", "N/A", rec.status, locked) +
         "</div>" +
         reading +
         note +
@@ -509,8 +581,8 @@
 
   function columnClass(day, shift) {
     var classes = [];
-    if (day.id === state.day && shift.id === state.shift) classes.push("is-active");
-    if (isTodaySlot(day.id, shift.id)) classes.push("is-today");
+    if (isLiveDay(day.id)) classes.push("is-live");
+    if (day.id === state.day && shift.id === state.shift) classes.push("is-selected");
     if (shift.id === "day") classes.push("day-start");
     return classes.join(" ");
   }
@@ -537,14 +609,16 @@
         SHIFTS.forEach(function (shift) {
           var data = readShift(day.id, shift.id);
           var rec = getItem(data, item.id);
+          var open = isLiveDay(day.id);
           var symbol = rec.status === "ok" ? "✓" : rec.status === "issue" ? "✗" : rec.status === "na" ? "–" : "";
           var statusText = rec.status === "ok" ? "OK" : rec.status === "issue" ? "Issue" : rec.status === "na" ? "N/A" : "Not checked";
           var bits = [item.label, day.label, shift.label, statusText];
           if (rec.reading) bits.push(rec.reading);
           if (rec.note) bits.push(rec.note);
-          var cellClass = ["cell", rec.status, rec.note ? "has-note" : ""].filter(Boolean).join(" ");
+          if (!open) bits.push("View only");
+          var cellClass = ["cell", rec.status, rec.note ? "has-note" : "", open ? "is-open" : "is-locked"].filter(Boolean).join(" ");
           parts.push(
-            '<td class="' + columnClass(day, shift) + '"><button type="button" class="' + cellClass + '" data-item="' + item.id + '" data-day="' + day.id + '" data-shift="' + shift.id + '" title="' + esc(bits.join(" · ")) + '" aria-label="' + esc(bits.join(", ")) + '">' + symbol + "</button></td>"
+            '<td class="' + columnClass(day, shift) + '"><button type="button" class="' + cellClass + '"' + (open ? "" : " disabled") + ' data-item="' + item.id + '" data-day="' + day.id + '" data-shift="' + shift.id + '" title="' + esc(bits.join(" · ")) + '" aria-label="' + esc(bits.join(", ")) + '">' + symbol + "</button></td>"
           );
         });
       });
@@ -637,6 +711,7 @@
   }
 
   function setItemStatus(itemId, status) {
+    if (!isLiveDay(state.day)) return;
     var prev = getItem(readShift(), itemId);
     if (prev.status === status) return;
     var shift = ensureShift();
@@ -655,6 +730,7 @@
   }
 
   function cycleCell(day, shiftName, itemId) {
+    if (!isLiveDay(day)) return;
     var order = ["", "ok", "issue", "na"];
     var shift = ensureShift(day, shiftName);
     var prev = getItem(shift, itemId);
@@ -678,6 +754,7 @@
   }
 
   function markAllOk() {
+    if (!isLiveDay(state.day)) return;
     var existing = readShift();
     var stats = shiftStats(existing);
     var allOk = stats.checked === stats.total && ITEMS.every(function (item) {
@@ -696,6 +773,7 @@
   }
 
   function clearShift() {
+    if (!isLiveDay(state.day)) return;
     var data = readShift();
     if (!data) return;
     if (!window.confirm("Clear this shift?")) return;
@@ -769,6 +847,7 @@
   }
 
   function onDateChange() {
+    if (!isLiveDay(state.day)) return;
     var input = el("shift-date");
     var shift = ensureShift();
     shift.date = input.value || dateForDay(state.day);
@@ -780,6 +859,7 @@
   }
 
   function onInitialsInput(event) {
+    if (!isLiveDay(state.day)) return;
     var input = event.target;
     var upper = input.value.toUpperCase();
     if (input.value !== upper) {
@@ -817,6 +897,7 @@
   }
 
   function onChecklistInput(event) {
+    if (!isLiveDay(state.day)) return;
     var itemId = event.target.dataset.note || event.target.dataset.reading;
     if (!itemId) return;
     var shift = ensureShift();
@@ -1008,9 +1089,14 @@
 
   function init() {
     sanitize();
+    catchUpToToday();
     bind();
     renderAll();
     save();
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") watchCalendarDay();
+    });
+    window.setInterval(watchCalendarDay, 30000);
   }
 
   init();

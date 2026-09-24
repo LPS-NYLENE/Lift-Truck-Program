@@ -329,6 +329,13 @@ textarea {
   color: var(--ok);
 }
 
+.shift-lock {
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #8a5a12;
+}
+
 .shift-strip {
   display: flex;
   gap: 6px;
@@ -358,12 +365,12 @@ textarea {
   color: #f6f3ea;
 }
 
-.chip.is-today:not(.is-active) {
+.chip.is-live:not(.is-active) {
   border-color: var(--yellow);
   box-shadow: inset 0 0 0 1px var(--yellow);
 }
 
-.chip.is-active.is-today {
+.chip.is-active.is-live {
   box-shadow: inset 0 0 0 2px var(--yellow);
 }
 
@@ -389,12 +396,18 @@ textarea {
   background: transparent;
 }
 
-.chip.is-partial .chip-dot { background: var(--yellow); }
+.chip.is-partial .chip-dot { background: #8a8478; }
 .chip.is-done .chip-dot { background: #3c9d68; }
 .chip.is-issue .chip-dot { background: #d6453d; }
-.chip.is-active.is-partial .chip-dot { background: #ffe08a; }
+.chip.is-live .chip-dot { background: var(--yellow); }
+.chip.is-live.is-done .chip-dot { background: #3c9d68; }
+.chip.is-live.is-issue .chip-dot { background: #d6453d; }
+.chip.is-active.is-partial .chip-dot { background: #c8c2b6; }
 .chip.is-active.is-done .chip-dot { background: #8ddeb0; }
 .chip.is-active.is-issue .chip-dot { background: #ffb1a8; }
+.chip.is-active.is-live .chip-dot { background: #ffe08a; }
+.chip.is-active.is-live.is-done .chip-dot { background: #8ddeb0; }
+.chip.is-active.is-live.is-issue .chip-dot { background: #ffb1a8; }
 
 .shift-meta {
   display: grid;
@@ -617,12 +630,9 @@ textarea {
   background: #fbf8f3;
 }
 
-.sheet td.is-active,
-.sheet th.is-active {
-  background: #fff4d4;
-}
-
-.sheet tbody tr:nth-child(even) td.is-active {
+.sheet td.is-live,
+.sheet th.is-live,
+.sheet tbody tr:nth-child(even) td.is-live {
   background: #fff4d4;
 }
 
@@ -651,8 +661,12 @@ textarea {
   line-height: 1.1;
 }
 
-.colhead.is-today {
+.colhead.is-live {
   box-shadow: inset 0 -3px 0 var(--yellow);
+}
+
+.colhead.is-selected:not(.is-live) {
+  box-shadow: inset 0 -3px 0 var(--header);
 }
 
 .col-day {
@@ -667,7 +681,8 @@ textarea {
   color: var(--muted);
 }
 
-.colhead.is-active .col-shift {
+.colhead.is-live .col-shift,
+.colhead.is-selected .col-shift {
   color: var(--ink);
 }
 
@@ -701,6 +716,66 @@ textarea {
 
 .cell.has-note {
   box-shadow: inset 0 -3px 0 var(--yellow);
+}
+
+.cell.is-open {
+  border-color: #d7a52a;
+  background: #fff6dc;
+}
+
+.cell.is-open.ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border-color: #b7dfc6;
+  box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
+.cell.is-open.issue {
+  background: #fde8e4;
+  color: var(--issue);
+  border-color: #f2b8b0;
+  box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
+.cell.is-open.na {
+  background: var(--na-bg);
+  color: var(--na);
+  border-color: #d5dbe1;
+  box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
+.cell.is-open.has-note {
+  box-shadow: inset 0 -3px 0 var(--yellow), inset 0 0 0 2px var(--yellow);
+}
+
+.cell.is-locked,
+.cell:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  background: #f7f4ee;
+  color: #9a9388;
+  border-color: #ece6dc;
+}
+
+.cell.is-locked.ok,
+.cell:disabled.ok {
+  background: #f3f7f5;
+  color: #7aa58d;
+  border-color: #d5e6dc;
+}
+
+.cell.is-locked.issue,
+.cell:disabled.issue {
+  background: #faf6f5;
+  color: #c48882;
+  border-color: #f0ddd9;
+}
+
+.cell.is-locked.na,
+.cell:disabled.na {
+  background: #f4f5f6;
+  color: #9aa3ab;
+  border-color: #e3e7eb;
 }
 
 .meta-btn {
@@ -899,6 +974,38 @@ button.linkish {
 
   .sheet tr {
     break-inside: avoid;
+  }
+
+  .cell.is-locked,
+  .cell:disabled {
+    opacity: 1;
+    color: inherit;
+    background: #fff;
+    border-color: #e6dfd3;
+  }
+
+  .cell.ok,
+  .cell.is-locked.ok,
+  .cell:disabled.ok {
+    background: var(--ok-bg);
+    color: var(--ok);
+    border-color: #b7dfc6;
+  }
+
+  .cell.issue,
+  .cell.is-locked.issue,
+  .cell:disabled.issue {
+    background: #fde8e4;
+    color: var(--issue);
+    border-color: #f2b8b0;
+  }
+
+  .cell.na,
+  .cell.is-locked.na,
+  .cell:disabled.na {
+    background: var(--na-bg);
+    color: var(--na);
+    border-color: #d5dbe1;
   }
 
   textarea {
