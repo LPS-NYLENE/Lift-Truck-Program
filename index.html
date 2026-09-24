@@ -27,18 +27,8 @@
   <div class="toolbar no-print">
     <div class="field">
       <label for="truck-select">Truck make / model</label>
-      <div class="row">
-        <select id="truck-select"></select>
-        <button type="button" id="delete-truck-btn" class="btn ghost danger" title="Remove this truck from this device">Remove</button>
-      </div>
+      <select id="truck-select"></select>
     </div>
-    <form id="add-truck-form" class="field" autocomplete="off">
-      <label for="new-truck">Add a truck</label>
-      <div class="row">
-        <input id="new-truck" type="text" maxlength="60" placeholder="e.g. Nissan Nomad 50" required>
-        <button type="submit" class="btn">Add</button>
-      </div>
-    </form>
     <div class="field">
       <label for="week-input">Week</label>
       <div class="row">
@@ -52,11 +42,6 @@
   </div>
 
   <p id="print-meta" class="print-only"></p>
-
-  <div id="empty" class="empty" hidden>
-    <h2>Start a sheet for a lift truck</h2>
-    <p>Add the make and model above. Each truck keeps its own weekly inspection record on this device.</p>
-  </div>
 
   <div id="workspace" class="layout" hidden>
     <div class="view-tabs no-print" aria-label="View">
@@ -79,7 +64,7 @@
             <input type="date" id="shift-date">
           </label>
           <label class="stack slim">
-            <span>Initials</span>
+            <span id="initials-label">Initials</span>
             <input id="shift-initials" type="text" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC" list="initials-list">
           </label>
         </div>
@@ -111,7 +96,7 @@
       <div id="issue-log"></div>
       <div class="notes-grid">
         <label class="stack">
-          <span>Remarks</span>
+          <span id="remarks-label">Remarks</span>
           <textarea id="remarks" rows="4" placeholder="Anything the next shift should know"></textarea>
           <div id="print-remarks" class="print-block"></div>
         </label>
