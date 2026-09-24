@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var STANDARD_ITEMS = [
+  var FORK_LIFT_ITEMS = [
     { id: "fuel", label: "Fuel" },
     { id: "engine-oil", label: "Engine Oil Level" },
     { id: "radiator", label: "Radiator Fluid Level" },
@@ -27,7 +27,7 @@
     { id: "tank-relief", label: "Tank Relief Valve" }
   ];
 
-  var CROWN_ITEMS = [
+  var PALLET_TRUCK_ITEMS = [
     { id: "visible-damage", label: "Visible Damage, dents, broken" },
     { id: "leaks", label: "Leaks" },
     { id: "wheels", label: "Wheels Cond. clean" },
@@ -41,10 +41,12 @@
   ];
 
   var TRUCKS = [
-    { id: "nissan-nomad-50", name: "Nissan Nomad 50", items: "standard" },
-    { id: "coperion-forklift", name: "Coperion forklift", items: "standard" },
-    { id: "lift-7a284593", name: "Lift truck #7A284593(#24)", items: "crown" },
-    { id: "lift-7a351502", name: "Lift truck #7A351502(#35)", items: "crown" }
+    { id: "pr-forklift", name: "P&R Forklift", items: "fork_lift" },
+    { id: "coperion-forklift", name: "Coperion Forklift", items: "fork_lift" },
+    { id: "pallet-truck-7A284593", name: "Pallet Truck #7A284593 (#24)", items: "pallet_truck" },
+    { id: "pallet-truck-10111099", name: "Pallet Truck #10111099 (#27)", items: "pallet_truck" },
+    { id: "pallet-truck-7A265407", name: "Pallet Truck #7A265407 (#29)", items: "pallet_truck" },
+    { id: "pallet-truck-7A351502", name: "Pallet Truck #7A351502 (#35)", items: "pallet_truck" }
   ];
 
   var DAYS = [
@@ -166,12 +168,12 @@
 
   function currentItems() {
     var truck = currentTruck();
-    return truck && truck.items === "crown" ? CROWN_ITEMS : STANDARD_ITEMS;
+    return truck && truck.items === "pallet_truck" ? PALLET_TRUCK_ITEMS : FORK_LIFT_ITEMS;
   }
 
-  function isCrownTruck() {
+  function isPalletTruck() {
     var truck = currentTruck();
-    return !!(truck && truck.items === "crown");
+    return !!(truck && truck.items === "pallet_truck");
   }
 
   function loadState() {
@@ -495,10 +497,10 @@
     el("shift-date").disabled = !editable;
     el("shift-initials").disabled = !editable;
     el("clear-shift").disabled = !(editable && readShift());
-    var crown = isCrownTruck();
-    el("remarks-label").textContent = crown ? "Comments" : "Remarks";
-    el("remarks").placeholder = crown ? "Comments for this week" : "Anything the next shift should know";
-    el("initials-label").textContent = crown ? "Operator initials" : "Initials";
+    var pallet_truck = isPalletTruck();
+    el("remarks-label").textContent = pallet_truck ? "Comments" : "Remarks";
+    el("remarks").placeholder = pallet_truck ? "Comments for this week" : "Anything the next shift should know";
+    el("initials-label").textContent = pallet_truck ? "Operator initials" : "Initials";
     renderSheetHint();
   }
 
@@ -655,7 +657,7 @@
     });
     [
       { key: "date", label: "Date" },
-      { key: "initials", label: isCrownTruck() ? "Operator initials" : "Initials" }
+      { key: "initials", label: isPalletTruck() ? "Operator initials" : "Initials" }
     ].forEach(function (meta) {
       parts.push('<tr class="meta-row"><th class="item-col" scope="row">' + esc(meta.label) + "</th>");
       DAYS.forEach(function (day) {
@@ -978,7 +980,7 @@
       lines.push("");
     }
     var sheet = readSheet();
-    lines.push(isCrownTruck() ? "COMMENTS" : "REMARKS");
+    lines.push(isPalletTruck() ? "COMMENTS" : "REMARKS");
     lines.push((sheet.remarks || "").trim() || "—");
     lines.push("");
     lines.push("MAINTENANCE REQUIRED");
