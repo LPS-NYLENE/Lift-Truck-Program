@@ -512,19 +512,22 @@ textarea {
   border-color: var(--header);
 }
 
-.check-actions button[aria-pressed="true"][data-set="ok"] {
+.check-actions button[aria-pressed="true"][data-set="ok"],
+.check-actions button.is-selected[data-set="ok"] {
   background: var(--ok);
   border-color: var(--ok);
   color: #fff;
 }
 
-.check-actions button[aria-pressed="true"][data-set="issue"] {
+.check-actions button[aria-pressed="true"][data-set="issue"],
+.check-actions button.is-selected[data-set="issue"] {
   background: var(--issue);
   border-color: var(--issue);
   color: #fff;
 }
 
-.check-actions button[aria-pressed="true"][data-set="na"] {
+.check-actions button[aria-pressed="true"][data-set="na"],
+.check-actions button.is-selected[data-set="na"] {
   background: var(--na);
   border-color: var(--na);
   color: #fff;
