@@ -1002,10 +1002,7 @@
 
   var EXCEL_FILE_NAME = "Nylene consumption sheet.xlsx";
   var EXCEL_PATH = "G:\\Installed Software\\1 Temp\\1 Temp\\Cool Room Consumption Folder\\" + EXCEL_FILE_NAME;
-  var EXCEL_DB = "lift-truck-inspection-excel";
-  var EXCEL_STORE = "handles";
-  var EXCEL_KEY = "workbook";
-  var excelHandle = null;
+  var EXCEL_SAVE_PORT = 8734;
 
   function downloadBlob(blob, filename) {
     var url = URL.createObjectURL(blob);
@@ -1159,231 +1156,44 @@
     return window.LiftExcel.build(buildExcelModel());
   }
 
-  function excelBlob() {
-    return new Blob([excelBytes()], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    });
-  }
-
-  function filePickerSupported() {
-    return !!(window.isSecureContext && typeof window.showSaveFilePicker === "function");
-  }
-
-  function chooseExcelFile() {
-    return window.showSaveFilePicker({
-      id: "nylene-consumption-sheet",
-      suggestedName: EXCEL_FILE_NAME,
-      types: [{
-        description: "Excel workbook",
-        accept: {
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"]
-        }
-      }]
-    });
-  }
-
-  function excelDb() {
-    return new Promise(function (resolve, reject) {
-      if (!window.indexedDB) {
-        reject(new Error("IndexedDB unavailable"));
-        return;
-      }
-      var request = window.indexedDB.open(EXCEL_DB, 1);
-      request.onupgradeneeded = function () {
-        if (!request.result.objectStoreNames.contains(EXCEL_STORE)) {
-          request.result.createObjectStore(EXCEL_STORE);
-        }
-      };
-      request.onsuccess = function () { resolve(request.result); };
-      request.onerror = function () { reject(request.error); };
-    });
-  }
-
-  function excelDbGet() {
-    return excelDb().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(EXCEL_STORE, "readonly");
-        var request = tx.objectStore(EXCEL_STORE).get(EXCEL_KEY);
-        request.onsuccess = function () { resolve(request.result || null); };
-        request.onerror = function () { reject(request.error); };
-      });
-    });
-  }
-
-  function excelDbSet(handle) {
-    return excelDb().then(function (db) {
-      return settleWithin(new Promise(function (resolve, reject) {
-        var tx;
-        try {
-          tx = db.transaction(EXCEL_STORE, "readwrite");
-          tx.objectStore(EXCEL_STORE).put(handle, EXCEL_KEY);
-        } catch (err) {
-          reject(err);
-          return;
-        }
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
-        tx.onabort = function () { reject(tx.error || new Error("aborted")); };
-      }), 1500);
-    });
-  }
-
-  function usableExcelHandle(handle) {
-    return !!(handle && typeof handle.createWritable === "function");
-  }
-
-  function ensureWritePermission(handle) {
-    var opts = { mode: "readwrite" };
-    if (!handle.queryPermission || !handle.requestPermission) return Promise.resolve(true);
-    return handle.queryPermission(opts).then(function (permission) {
-      if (permission === "granted") return true;
-      return handle.requestPermission(opts).then(function (next) {
-        return next === "granted";
-      });
-    });
-  }
-
-  function settleWithin(promise, ms) {
-    return new Promise(function (resolve, reject) {
-      var settled = false;
-      var timer = setTimeout(function () {
-        if (settled) return;
-        settled = true;
-        resolve();
-      }, ms);
-      promise.then(function (value) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(value);
-      }, function (err) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(err);
-      });
-    });
-  }
-
-  function writeExcelHandle(handle, blob) {
-    return blob.arrayBuffer().then(function (buffer) {
-      return handle.createWritable().then(function (writable) {
-        var bytes = new Uint8Array(buffer);
-        var done = writable.write(bytes).then(function () {
-          return writable.close();
-        }, function (err) {
-          var cancel = typeof writable.abort === "function" ? writable.abort() : writable.close();
-          return Promise.resolve(cancel).then(function () { throw err; }, function () { throw err; });
-        });
-        // Chrome on some desktops writes the file, then never resolves close().
-        return settleWithin(done, 1500);
-      });
-    });
-  }
-
-  function rememberExcelHandle(handle) {
-    excelHandle = handle;
-    var change = el("excel-change");
-    if (change) change.hidden = false;
-    return excelDbSet(handle).catch(function () {});
-  }
-
-  function excelErrorMessage(err) {
-    var name = err && err.name;
-    if (name === "AbortError") return "";
-    if (name === "NotFoundError") {
-      return "That Excel file is missing. Click Change Excel file and choose " + EXCEL_PATH + ".";
+  function excelSaveUrl() {
+    if (location.protocol === "http:" || location.protocol === "https:") {
+      return new URL("/api/save-excel", location.href).href;
     }
-    if (name === "NoModificationAllowedError" || name === "InvalidStateError") {
-      return "Excel has that workbook open. Close Nylene consumption sheet.xlsx, then save again.";
-    }
-    if (name === "NotAllowedError" || name === "SecurityError") {
-      return "The browser blocked the save. Click Save Excel again and allow access to " + EXCEL_PATH + ".";
-    }
-    return "Could not save the Excel file. Close it in Excel if it is open, then try again.";
+    return "http://127.0.0.1:" + EXCEL_SAVE_PORT + "/api/save-excel";
   }
 
-  function fallbackExcelDownload(blob) {
-    downloadBlob(blob, EXCEL_FILE_NAME);
-    setExcelStatus(
-      "Downloaded " + EXCEL_FILE_NAME + ". This browser cannot write straight to " + EXCEL_PATH + ". Move the download into that folder if it did not land there. Each truck is on its own sheet.",
-      ""
-    );
-  }
-
-  function finishExcelSave(handle) {
-    return rememberExcelHandle(handle).then(function () {
-      setExcelStatus("Saved " + (handle.name || EXCEL_FILE_NAME) + ". Each truck has its own sheet.", "saved");
-    });
-  }
-
-  function saveToHandle(handle, blob, allowRepick) {
-    return ensureWritePermission(handle).then(function (allowed) {
-      if (!allowed) {
-        var denied = new Error("permission");
-        denied.name = "NotAllowedError";
-        throw denied;
-      }
-      return writeExcelHandle(handle, blob).then(function () { return handle; });
-    }).catch(function (err) {
-      var retry = allowRepick && err && (err.name === "NotFoundError" || err.name === "NotAllowedError");
-      if (!retry) throw err;
-      excelHandle = null;
-      return chooseExcelFile().then(function (picked) {
-        return saveToHandle(picked, blob, false);
-      });
-    });
-  }
-
-  function saveExcel(forcePick) {
-    var blob;
+  function saveExcel() {
+    var bytes;
     try {
-      blob = excelBlob();
+      bytes = excelBytes();
     } catch (err) {
       setExcelStatus("Could not build the Excel file.", "error");
       return;
     }
-    if (!filePickerSupported()) {
-      fallbackExcelDownload(blob);
-      return;
-    }
-    var pending = !forcePick && usableExcelHandle(excelHandle)
-      ? Promise.resolve(excelHandle)
-      : chooseExcelFile();
-    setExcelStatus("Writing the Excel file…", "");
-    pending.then(function (handle) {
-      return saveToHandle(handle, blob, !forcePick);
-    }).then(function (handle) {
-      return finishExcelSave(handle);
+    setExcelStatus("Saving to " + EXCEL_PATH + "…", "");
+    fetch(excelSaveUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      body: bytes
+    }).then(function (response) {
+      return response.text().then(function (text) {
+        var data = {};
+        if (text) {
+          try { data = JSON.parse(text); } catch (err) { data = {}; }
+        }
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.error || "Could not save to " + EXCEL_PATH + ".");
+        }
+        setExcelStatus("Saved to " + (data.path || EXCEL_PATH) + ". Each truck has its own sheet.", "saved");
+      });
     }).catch(function (err) {
-      var message = excelErrorMessage(err);
-      if (!message) {
-        setExcelStatus("Save Excel writes one sheet per truck into " + EXCEL_PATH + ". The first save asks you to choose that file. After that, Save Excel updates it directly.", "");
-        return;
-      }
-      if (err && (err.name === "SecurityError" || err.name === "NotAllowedError") && !usableExcelHandle(excelHandle)) {
-        fallbackExcelDownload(blob);
-        return;
+      var message = err && err.message ? err.message : "";
+      if (!message || message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource.") {
+        message = "Could not save to " + EXCEL_PATH + ". Open this sheet with Start Inspection Sheet.bat on this computer, then click Save Excel again.";
       }
       setExcelStatus(message, "error");
     });
-  }
-
-  function restoreExcelHandle() {
-    if (!filePickerSupported()) {
-      setExcelStatus(
-        "Save Excel downloads " + EXCEL_FILE_NAME + " with one sheet per truck. This page can write straight into " + EXCEL_PATH + " only when it is opened from a web address. Move the download into that folder if the browser saved it somewhere else.",
-        ""
-      );
-      return;
-    }
-    excelDbGet().then(function (handle) {
-      if (!usableExcelHandle(handle)) return;
-      excelHandle = handle;
-      var change = el("excel-change");
-      if (change) change.hidden = false;
-      setExcelStatus("Excel file linked: " + (handle.name || EXCEL_FILE_NAME) + ". Save Excel updates it — one sheet per truck. Keep that file at " + EXCEL_PATH + ".", "");
-    }).catch(function () {});
   }
 
   function bind() {
@@ -1429,8 +1239,7 @@
     });
     el("print-btn").addEventListener("click", function () { window.print(); });
     el("download-btn").addEventListener("click", downloadWeek);
-    el("excel-btn").addEventListener("click", function () { saveExcel(false); });
-    el("excel-change").addEventListener("click", function () { saveExcel(true); });
+    el("excel-btn").addEventListener("click", saveExcel);
     el("mark-all").addEventListener("click", markAllOk);
     el("clear-shift").addEventListener("click", clearShift);
     el("clear-week-btn").addEventListener("click", clearWeek);
@@ -1460,7 +1269,6 @@
     bind();
     renderAll();
     save();
-    restoreExcelHandle();
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible") watchCalendarDay();
     });
