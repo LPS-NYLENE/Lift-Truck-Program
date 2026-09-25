@@ -254,6 +254,24 @@ textarea {
   font-weight: 600;
 }
 
+.excel-bar {
+  margin: 0;
+  padding: 8px 20px 10px;
+  background: #f7f4ee;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.excel-bar.is-saved {
+  color: var(--ok);
+}
+
+.excel-bar.is-error {
+  color: var(--issue);
+}
+
 .empty {
   max-width: 38rem;
   margin: 28px auto;

@@ -133,14 +133,19 @@
     return (d.getMonth() + 1) + "/" + d.getDate();
   }
 
-  function weekRangeLabel() {
-    var start = parseISO(state.weekStart);
+  function weekRangeLabelFor(weekStart) {
+    var start = parseISO(weekStart);
     var end = addDays(start, 6);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return String(weekStart || "");
     var endText = MONTHS[end.getMonth()] + " " + end.getDate() + ", " + end.getFullYear();
     if (start.getFullYear() !== end.getFullYear()) {
       return MONTHS[start.getMonth()] + " " + start.getDate() + ", " + start.getFullYear() + " – " + endText;
     }
     return MONTHS[start.getMonth()] + " " + start.getDate() + " – " + endText;
+  }
+
+  function weekRangeLabel() {
+    return weekRangeLabelFor(state.weekStart);
   }
 
   function esc(value) {
@@ -992,14 +997,393 @@
     var truck = currentTruck();
     if (!truck) return;
     var blob = new Blob([buildReport()], { type: "text/plain;charset=utf-8" });
+    downloadBlob(blob, "lift-inspection-" + slug(truck.name) + "-" + state.weekStart + ".txt");
+  }
+
+  var EXCEL_FILE_NAME = "Nylene consumption sheet.xlsx";
+  var EXCEL_PATH = "G:\\Installed Software\\1 Temp\\1 Temp\\Cool Room Consumption Folder\\" + EXCEL_FILE_NAME;
+  var EXCEL_DB = "lift-truck-inspection-excel";
+  var EXCEL_STORE = "handles";
+  var EXCEL_KEY = "workbook";
+  var excelHandle = null;
+
+  function downloadBlob(blob, filename) {
     var url = URL.createObjectURL(blob);
     var link = document.createElement("a");
     link.href = url;
-    link.download = "lift-inspection-" + slug(truck.name) + "-" + state.weekStart + ".txt";
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+  }
+
+  function setExcelStatus(message, kind) {
+    var node = el("excel-status");
+    if (!node) return;
+    node.textContent = message;
+    node.classList.toggle("is-saved", kind === "saved");
+    node.classList.toggle("is-error", kind === "error");
+  }
+
+  function savedStamp() {
+    var d = new Date();
+    var hours = d.getHours();
+    var suffix = hours >= 12 ? "PM" : "AM";
+    var h = hours % 12;
+    if (h === 0) h = 12;
+    return MONTHS_LONG[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear() + "  " + h + ":" + pad(d.getMinutes()) + " " + suffix;
+  }
+
+  function truckItems(truck) {
+    return truck && truck.items === "pallet_truck" ? PALLET_TRUCK_ITEMS : FORK_LIFT_ITEMS;
+  }
+
+  function weeksForTruck(truckId) {
+    var prefix = truckId + "::";
+    return Object.keys(state.sheets).filter(function (key) {
+      return key.indexOf(prefix) === 0 && /^\d{4}-\d{2}-\d{2}$/.test(key.slice(prefix.length));
+    }).map(function (key) {
+      return key.slice(prefix.length);
+    }).sort();
+  }
+
+  function readTruckSheet(truckId, weekStart) {
+    var sheet = state.sheets[truckId + "::" + weekStart];
+    if (!sheet || typeof sheet !== "object") return emptySheet();
+    return {
+      remarks: typeof sheet.remarks === "string" ? sheet.remarks : "",
+      maintenance: typeof sheet.maintenance === "string" ? sheet.maintenance : "",
+      shifts: sheet.shifts && typeof sheet.shifts === "object" ? sheet.shifts : {}
+    };
+  }
+
+  function excelDisplay(rec) {
+    var status = rec.status === "ok" ? "Y" : rec.status === "issue" ? "N" : rec.status === "na" ? "N/A" : "";
+    var reading = (rec.reading || "").trim();
+    var note = (rec.note || "").trim();
+    var text = reading || status;
+    if (rec.status === "issue" && reading) text = "N " + reading;
+    if (note) text = text ? text + " — " + note : note;
+    var style = "grid";
+    if (rec.status === "issue" || note) style = "issue";
+    else if (rec.status === "na") style = "na";
+    else if (rec.status === "ok" || reading) style = "ok";
+    return { text: text, style: style };
+  }
+
+  function buildExcelModel() {
+    var stamp = savedStamp();
+    return {
+      sheets: TRUCKS.map(function (truck) {
+        var items = truckItems(truck);
+        var pallet = truck.items === "pallet_truck";
+        var rows = [
+          { height: 26, merge: true, cells: [{ text: "NYLENE Daily Lift Truck Inspection Sheet", style: "title" }] },
+          { merge: true, cells: [{ text: "Truck: " + truck.name, style: "text" }] },
+          { merge: true, cells: [{ text: "Saved " + stamp, style: "text" }] },
+          { merge: true, cells: [{ text: "Y = Yes     N = No     N/A = Not applicable", style: "text" }] },
+          { cells: [] }
+        ];
+        var weeks = weeksForTruck(truck.id);
+        if (!weeks.length) {
+          rows.push({ merge: true, cells: [{ text: "No inspections recorded for this truck.", style: "text" }] });
+        }
+        weeks.forEach(function (weekStart, weekIndex) {
+          if (weekIndex > 0) rows.push({ cells: [] });
+          var data = readTruckSheet(truck.id, weekStart);
+          rows.push({
+            height: 22,
+            merge: true,
+            cells: [{ text: "Week of " + weekRangeLabelFor(weekStart), style: "week" }]
+          });
+          var headers = [{ text: "Item", style: "header" }];
+          DAYS.forEach(function (day, dayIndex) {
+            var iso = toISO(addDays(parseISO(weekStart), dayIndex));
+            SHIFTS.forEach(function (shift) {
+              headers.push({ text: day.short + " " + formatMd(iso) + "\n" + shift.short, style: "header" });
+            });
+          });
+          rows.push({ height: 36, cells: headers });
+          items.forEach(function (item) {
+            var cells = [{ text: item.label, style: "label" }];
+            var tall = false;
+            DAYS.forEach(function (day) {
+              SHIFTS.forEach(function (shift) {
+                var record = data.shifts[day.id + "-" + shift.id];
+                var shown = excelDisplay(getItem(record, item.id));
+                if (shown.text.length > 18) tall = true;
+                cells.push(shown);
+              });
+            });
+            rows.push({ height: tall ? 32 : undefined, cells: cells });
+          });
+          [
+            { key: "date", label: "Date" },
+            { key: "initials", label: pallet ? "Operator initials" : "Initials" }
+          ].forEach(function (meta) {
+            var cells = [{ text: meta.label, style: "meta" }];
+            DAYS.forEach(function (day) {
+              SHIFTS.forEach(function (shift) {
+                var record = data.shifts[day.id + "-" + shift.id] || {};
+                var text = meta.key === "date" && record.date ? formatMd(record.date) : meta.key === "initials" ? (record.initials || "") : "";
+                cells.push({ text: text, style: "meta" });
+              });
+            });
+            rows.push({ cells: cells });
+          });
+          rows.push({
+            height: 36,
+            cells: [
+              { text: pallet ? "Comments" : "Remarks", style: "meta" },
+              { text: (data.remarks || "").trim(), style: "text" }
+            ]
+          });
+          rows.push({
+            height: 36,
+            cells: [
+              { text: "Maintenance required", style: "meta" },
+              { text: (data.maintenance || "").trim(), style: "text" }
+            ]
+          });
+        });
+        return { name: truck.name, rows: rows };
+      })
+    };
+  }
+
+  function excelBytes() {
+    if (!window.LiftExcel || typeof window.LiftExcel.build !== "function") {
+      throw new Error("Excel builder missing");
+    }
+    return window.LiftExcel.build(buildExcelModel());
+  }
+
+  function excelBlob() {
+    return new Blob([excelBytes()], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+  }
+
+  function filePickerSupported() {
+    return !!(window.isSecureContext && typeof window.showSaveFilePicker === "function");
+  }
+
+  function chooseExcelFile() {
+    return window.showSaveFilePicker({
+      id: "nylene-consumption-sheet",
+      suggestedName: EXCEL_FILE_NAME,
+      types: [{
+        description: "Excel workbook",
+        accept: {
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"]
+        }
+      }]
+    });
+  }
+
+  function excelDb() {
+    return new Promise(function (resolve, reject) {
+      if (!window.indexedDB) {
+        reject(new Error("IndexedDB unavailable"));
+        return;
+      }
+      var request = window.indexedDB.open(EXCEL_DB, 1);
+      request.onupgradeneeded = function () {
+        if (!request.result.objectStoreNames.contains(EXCEL_STORE)) {
+          request.result.createObjectStore(EXCEL_STORE);
+        }
+      };
+      request.onsuccess = function () { resolve(request.result); };
+      request.onerror = function () { reject(request.error); };
+    });
+  }
+
+  function excelDbGet() {
+    return excelDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(EXCEL_STORE, "readonly");
+        var request = tx.objectStore(EXCEL_STORE).get(EXCEL_KEY);
+        request.onsuccess = function () { resolve(request.result || null); };
+        request.onerror = function () { reject(request.error); };
+      });
+    });
+  }
+
+  function excelDbSet(handle) {
+    return excelDb().then(function (db) {
+      return settleWithin(new Promise(function (resolve, reject) {
+        var tx;
+        try {
+          tx = db.transaction(EXCEL_STORE, "readwrite");
+          tx.objectStore(EXCEL_STORE).put(handle, EXCEL_KEY);
+        } catch (err) {
+          reject(err);
+          return;
+        }
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+        tx.onabort = function () { reject(tx.error || new Error("aborted")); };
+      }), 1500);
+    });
+  }
+
+  function usableExcelHandle(handle) {
+    return !!(handle && typeof handle.createWritable === "function");
+  }
+
+  function ensureWritePermission(handle) {
+    var opts = { mode: "readwrite" };
+    if (!handle.queryPermission || !handle.requestPermission) return Promise.resolve(true);
+    return handle.queryPermission(opts).then(function (permission) {
+      if (permission === "granted") return true;
+      return handle.requestPermission(opts).then(function (next) {
+        return next === "granted";
+      });
+    });
+  }
+
+  function settleWithin(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        resolve();
+      }, ms);
+      promise.then(function (value) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      }, function (err) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  function writeExcelHandle(handle, blob) {
+    return blob.arrayBuffer().then(function (buffer) {
+      return handle.createWritable().then(function (writable) {
+        var bytes = new Uint8Array(buffer);
+        var done = writable.write(bytes).then(function () {
+          return writable.close();
+        }, function (err) {
+          var cancel = typeof writable.abort === "function" ? writable.abort() : writable.close();
+          return Promise.resolve(cancel).then(function () { throw err; }, function () { throw err; });
+        });
+        // Chrome on some desktops writes the file, then never resolves close().
+        return settleWithin(done, 1500);
+      });
+    });
+  }
+
+  function rememberExcelHandle(handle) {
+    excelHandle = handle;
+    var change = el("excel-change");
+    if (change) change.hidden = false;
+    return excelDbSet(handle).catch(function () {});
+  }
+
+  function excelErrorMessage(err) {
+    var name = err && err.name;
+    if (name === "AbortError") return "";
+    if (name === "NotFoundError") {
+      return "That Excel file is missing. Click Change Excel file and choose " + EXCEL_PATH + ".";
+    }
+    if (name === "NoModificationAllowedError" || name === "InvalidStateError") {
+      return "Excel has that workbook open. Close Nylene consumption sheet.xlsx, then save again.";
+    }
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      return "The browser blocked the save. Click Save Excel again and allow access to " + EXCEL_PATH + ".";
+    }
+    return "Could not save the Excel file. Close it in Excel if it is open, then try again.";
+  }
+
+  function fallbackExcelDownload(blob) {
+    downloadBlob(blob, EXCEL_FILE_NAME);
+    setExcelStatus(
+      "Downloaded " + EXCEL_FILE_NAME + ". This browser cannot write straight to " + EXCEL_PATH + ". Move the download into that folder if it did not land there. Each truck is on its own sheet.",
+      ""
+    );
+  }
+
+  function finishExcelSave(handle) {
+    return rememberExcelHandle(handle).then(function () {
+      setExcelStatus("Saved " + (handle.name || EXCEL_FILE_NAME) + ". Each truck has its own sheet.", "saved");
+    });
+  }
+
+  function saveToHandle(handle, blob, allowRepick) {
+    return ensureWritePermission(handle).then(function (allowed) {
+      if (!allowed) {
+        var denied = new Error("permission");
+        denied.name = "NotAllowedError";
+        throw denied;
+      }
+      return writeExcelHandle(handle, blob).then(function () { return handle; });
+    }).catch(function (err) {
+      var retry = allowRepick && err && (err.name === "NotFoundError" || err.name === "NotAllowedError");
+      if (!retry) throw err;
+      excelHandle = null;
+      return chooseExcelFile().then(function (picked) {
+        return saveToHandle(picked, blob, false);
+      });
+    });
+  }
+
+  function saveExcel(forcePick) {
+    var blob;
+    try {
+      blob = excelBlob();
+    } catch (err) {
+      setExcelStatus("Could not build the Excel file.", "error");
+      return;
+    }
+    if (!filePickerSupported()) {
+      fallbackExcelDownload(blob);
+      return;
+    }
+    var pending = !forcePick && usableExcelHandle(excelHandle)
+      ? Promise.resolve(excelHandle)
+      : chooseExcelFile();
+    setExcelStatus("Writing the Excel file…", "");
+    pending.then(function (handle) {
+      return saveToHandle(handle, blob, !forcePick);
+    }).then(function (handle) {
+      return finishExcelSave(handle);
+    }).catch(function (err) {
+      var message = excelErrorMessage(err);
+      if (!message) {
+        setExcelStatus("Save Excel writes one sheet per truck into " + EXCEL_PATH + ". The first save asks you to choose that file. After that, Save Excel updates it directly.", "");
+        return;
+      }
+      if (err && (err.name === "SecurityError" || err.name === "NotAllowedError") && !usableExcelHandle(excelHandle)) {
+        fallbackExcelDownload(blob);
+        return;
+      }
+      setExcelStatus(message, "error");
+    });
+  }
+
+  function restoreExcelHandle() {
+    if (!filePickerSupported()) {
+      setExcelStatus(
+        "Save Excel downloads " + EXCEL_FILE_NAME + " with one sheet per truck. This page can write straight into " + EXCEL_PATH + " only when it is opened from a web address. Move the download into that folder if the browser saved it somewhere else.",
+        ""
+      );
+      return;
+    }
+    excelDbGet().then(function (handle) {
+      if (!usableExcelHandle(handle)) return;
+      excelHandle = handle;
+      var change = el("excel-change");
+      if (change) change.hidden = false;
+      setExcelStatus("Excel file linked: " + (handle.name || EXCEL_FILE_NAME) + ". Save Excel updates it — one sheet per truck. Keep that file at " + EXCEL_PATH + ".", "");
+    }).catch(function () {});
   }
 
   function bind() {
@@ -1045,6 +1429,8 @@
     });
     el("print-btn").addEventListener("click", function () { window.print(); });
     el("download-btn").addEventListener("click", downloadWeek);
+    el("excel-btn").addEventListener("click", function () { saveExcel(false); });
+    el("excel-change").addEventListener("click", function () { saveExcel(true); });
     el("mark-all").addEventListener("click", markAllOk);
     el("clear-shift").addEventListener("click", clearShift);
     el("clear-week-btn").addEventListener("click", clearWeek);
@@ -1074,6 +1460,7 @@
     bind();
     renderAll();
     save();
+    restoreExcelHandle();
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible") watchCalendarDay();
     });
