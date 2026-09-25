@@ -544,6 +544,12 @@ textarea {
   align-items: center;
 }
 
+.sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .legend {
   margin: 0;
   font-size: 13px;

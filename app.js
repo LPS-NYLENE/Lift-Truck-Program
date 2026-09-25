@@ -988,18 +988,352 @@
     return lines.join("\n");
   }
 
-  function downloadWeek() {
-    var truck = currentTruck();
-    if (!truck) return;
-    var blob = new Blob([buildReport()], { type: "text/plain;charset=utf-8" });
+  function downloadBlob(blob, filename) {
     var url = URL.createObjectURL(blob);
     var link = document.createElement("a");
     link.href = url;
-    link.download = "lift-inspection-" + slug(truck.name) + "-" + state.weekStart + ".txt";
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+  }
+
+  function noteSaved(message) {
+    var node = el("save-state");
+    node.textContent = message;
+    window.setTimeout(function () {
+      if (node.textContent === message) node.textContent = "Saved on this device";
+    }, 2800);
+  }
+
+  function pdfText(value) {
+    return String(value == null ? "" : value)
+      .replace(/\u2013|\u2014/g, "-")
+      .replace(/\u00b7/g, "|")
+      .replace(/[^\x20-\x7E]/g, "");
+  }
+
+  function pdfEscape(value) {
+    return pdfText(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  }
+
+  function pdfWidth(value, size) {
+    return pdfText(value).length * size * 0.5;
+  }
+
+  function wrapPdf(value, maxWidth, size) {
+    var clean = pdfText(value).replace(/\s+/g, " ").trim();
+    if (!clean) return ["-"];
+    var maxChars = Math.max(8, Math.floor(maxWidth / (size * 0.5)));
+    var words = clean.split(" ");
+    var lines = [];
+    var line = "";
+    function pushLong(word) {
+      var rest = word;
+      while (rest.length > maxChars) {
+        lines.push(rest.slice(0, maxChars));
+        rest = rest.slice(maxChars);
+      }
+      line = rest;
+    }
+    words.forEach(function (word) {
+      var next = line ? line + " " + word : word;
+      if (pdfWidth(next, size) <= maxWidth) {
+        line = next;
+        return;
+      }
+      if (line) lines.push(line);
+      if (pdfWidth(word, size) > maxWidth) pushLong(word);
+      else line = word;
+    });
+    if (line) lines.push(line);
+    return lines.length ? lines : ["-"];
+  }
+
+  function buildPdfBytes(streams) {
+    var objects = [];
+    function add(body) {
+      objects.push(body);
+      return objects.length;
+    }
+    add("<< /Type /Catalog /Pages 2 0 R >>");
+    add("");
+    var fontId = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    var boldId = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    var kids = [];
+    streams.forEach(function (stream) {
+      var contentId = add("<< /Length " + stream.length + " >>\nstream\n" + stream + "\nendstream");
+      var pageId = add(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 792 612] /Contents " + contentId +
+        " 0 R /Resources << /Font << /F1 " + fontId + " 0 R /F2 " + boldId + " 0 R >> >> >>"
+      );
+      kids.push(pageId + " 0 R");
+    });
+    objects[1] = "<< /Type /Pages /Kids [" + kids.join(" ") + "] /Count " + kids.length + " >>";
+    var body = "";
+    var offsets = [];
+    var header = "%PDF-1.4\n";
+    objects.forEach(function (obj, index) {
+      offsets.push(header.length + body.length);
+      body += (index + 1) + " 0 obj\n" + obj + "\nendobj\n";
+    });
+    function pad10(n) {
+      var s = String(n);
+      while (s.length < 10) s = "0" + s;
+      return s;
+    }
+    var xref = "xref\n0 " + (objects.length + 1) + "\n0000000000 65535 f \n";
+    offsets.forEach(function (offset) {
+      xref += pad10(offset) + " 00000 n \n";
+    });
+    var startxref = header.length + body.length;
+    var file = header + body + xref +
+      "trailer\n<< /Size " + (objects.length + 1) + " /Root 1 0 R >>\nstartxref\n" +
+      startxref + "\n%%EOF";
+    var bytes = new Uint8Array(file.length);
+    for (var i = 0; i < file.length; i += 1) bytes[i] = file.charCodeAt(i) & 255;
+    return bytes;
+  }
+
+  function buildWeekPdf() {
+    var pageW = 792;
+    var pageH = 612;
+    var margin = 28;
+    var truck = currentTruck();
+    var items = currentItems();
+    var streams = [];
+    var ops = [];
+
+    function endPage() {
+      if (!ops.length) return;
+      streams.push(ops.join("\n"));
+      ops = [];
+    }
+
+    function cmd(line) { ops.push(line); }
+
+    function pdfY(top, height) { return pageH - top - (height || 0); }
+
+    function fillRect(x, top, w, h, r, g, b) {
+      cmd(r + " " + g + " " + b + " rg");
+      cmd(round(x) + " " + round(pdfY(top, h)) + " " + round(w) + " " + round(h) + " re");
+      cmd("f");
+    }
+
+    function textAt(font, size, x, baselineFromTop, value, r, g, b) {
+      cmd("BT");
+      cmd("/" + font + " " + size + " Tf");
+      cmd((r || 0) + " " + (g || 0) + " " + (b || 0) + " rg");
+      cmd("1 0 0 1 " + round(x) + " " + round(pdfY(baselineFromTop)) + " Tm");
+      cmd("(" + pdfEscape(value) + ") Tj");
+      cmd("ET");
+    }
+
+    function textCenter(font, size, x, w, baselineFromTop, value, r, g, b) {
+      var width = pdfWidth(value, size);
+      textAt(font, size, x + Math.max(1, (w - width) / 2), baselineFromTop, value, r, g, b);
+    }
+
+    function round(n) { return Math.round(n * 100) / 100; }
+
+    var labelW = 150;
+    var colW = (pageW - margin * 2 - labelW) / (DAYS.length * SHIFTS.length);
+    var headH = 22;
+    var rowH = 13.6;
+    var bodyRows = items.length + 2;
+    var tableH = headH + bodyRows * rowH;
+
+    textAt("F2", 13, margin, 40, "NYLENE DAILY LIFT TRUCK INSPECTION SHEET", 0.1, 0.12, 0.09);
+    textAt("F1", 9, margin, 56, (truck ? truck.name : "") + "  |  Week of " + weekRangeLabel(), 0.3, 0.27, 0.22);
+    textAt("F2", 8, margin, 72, "Y", 0.08, 0.42, 0.26);
+    textAt("F1", 8, margin + 12, 72, "Yes", 0.2, 0.18, 0.14);
+    textAt("F2", 8, margin + 42, 72, "N", 0.63, 0.11, 0.07);
+    textAt("F1", 8, margin + 54, 72, "No     - N/A", 0.2, 0.18, 0.14);
+
+    var tableTop = 82;
+    var tableW = labelW + colW * DAYS.length * SHIFTS.length;
+    fillRect(margin, tableTop, tableW, headH, 0.95, 0.93, 0.89);
+
+    var columns = [];
+    DAYS.forEach(function (day) {
+      SHIFTS.forEach(function (shift) {
+        columns.push({ day: day, shift: shift, live: isLiveDay(day.id) });
+      });
+    });
+
+    columns.forEach(function (col, index) {
+      if (!col.live) return;
+      fillRect(margin + labelW + index * colW, tableTop, colW, tableH, 1, 0.956, 0.83);
+    });
+
+    items.forEach(function (item, rowIndex) {
+      var top = tableTop + headH + rowIndex * rowH;
+      if (rowIndex % 2 === 1) fillRect(margin, top, labelW, rowH, 0.984, 0.973, 0.953);
+      columns.forEach(function (col, index) {
+        var data = readShift(col.day.id, col.shift.id);
+        var rec = getItem(data, item.id);
+        var x = margin + labelW + index * colW;
+        if (rec.status === "ok") fillRect(x + 1, top + 1, colW - 2, rowH - 2, 0.91, 0.965, 0.933);
+        if (rec.status === "issue") fillRect(x + 1, top + 1, colW - 2, rowH - 2, 0.99, 0.91, 0.89);
+        if (rec.status === "na") fillRect(x + 1, top + 1, colW - 2, rowH - 2, 0.93, 0.945, 0.956);
+      });
+    });
+
+    columns.forEach(function (col, index) {
+      var x = margin + labelW + index * colW;
+      textCenter("F2", 7, x, colW, tableTop + 10, col.day.short.toUpperCase(), 0.15, 0.13, 0.1);
+      textCenter("F1", 6.5, x, colW, tableTop + 19, col.shift.short, 0.35, 0.32, 0.26);
+    });
+    textAt("F2", 8, margin + 4, tableTop + 16, "Item", 0.15, 0.13, 0.1);
+
+    function paintCell(x, top, w, h, value, color) {
+      var size = pdfWidth(value, 8) <= w - 3 ? 8 : 6.5;
+      textCenter("F2", size, x, w, top + h * 0.72, value, color[0], color[1], color[2]);
+    }
+
+    items.forEach(function (item, rowIndex) {
+      var top = tableTop + headH + rowIndex * rowH;
+      textAt("F1", 7, margin + 4, top + rowH * 0.7, item.label, 0.11, 0.1, 0.08);
+      columns.forEach(function (col, index) {
+        var data = readShift(col.day.id, col.shift.id);
+        var rec = getItem(data, item.id);
+        var value = rec.reading || (rec.status === "ok" ? "Y" : rec.status === "issue" ? "N" : rec.status === "na" ? "-" : "");
+        if (!value) return;
+        var color = rec.reading ? [0.11, 0.1, 0.08] : value === "Y" ? [0.08, 0.42, 0.26] : value === "N" ? [0.63, 0.11, 0.07] : [0.31, 0.35, 0.39];
+        paintCell(margin + labelW + index * colW, top, colW, rowH, value, color);
+      });
+    });
+
+    [
+      { key: "date", label: "Date" },
+      { key: "initials", label: isPalletTruck() ? "Operator initials" : "Initials" }
+    ].forEach(function (meta, metaIndex) {
+      var top = tableTop + headH + (items.length + metaIndex) * rowH;
+      fillRect(margin, top, labelW, rowH, 0.97, 0.95, 0.92);
+      textAt("F2", 7, margin + 4, top + rowH * 0.7, meta.label, 0.2, 0.18, 0.14);
+      columns.forEach(function (col, index) {
+        var data = readShift(col.day.id, col.shift.id);
+        var value = "";
+        if (meta.key === "date" && data && data.date) value = formatMd(data.date);
+        if (meta.key === "initials" && data && data.initials) value = data.initials;
+        if (!value) return;
+        paintCell(margin + labelW + index * colW, top, colW, rowH, value, [0.11, 0.1, 0.08]);
+      });
+    });
+
+    cmd("0.82 0.78 0.72 RG");
+    cmd("0.6 w");
+    for (var r = 0; r <= bodyRows; r += 1) {
+      var lineTop = tableTop + headH + r * rowH;
+      cmd(round(margin) + " " + round(pdfY(lineTop)) + " m");
+      cmd(round(margin + tableW) + " " + round(pdfY(lineTop)) + " l");
+      cmd("S");
+    }
+    cmd(round(margin) + " " + round(pdfY(tableTop)) + " m");
+    cmd(round(margin + tableW) + " " + round(pdfY(tableTop)) + " l");
+    cmd("S");
+    for (var c = 0; c <= columns.length; c += 1) {
+      var x = margin + (c === 0 ? 0 : labelW + (c - 1) * colW);
+      if (c > 1 && (c - 1) % 2 === 0) cmd("0.62 0.56 0.48 RG");
+      else cmd("0.82 0.78 0.72 RG");
+      cmd(round(x) + " " + round(pdfY(tableTop + tableH)) + " m");
+      cmd(round(x) + " " + round(pdfY(tableTop)) + " l");
+      cmd("S");
+    }
+    cmd(round(margin + tableW) + " " + round(pdfY(tableTop + tableH)) + " m");
+    cmd(round(margin + tableW) + " " + round(pdfY(tableTop)) + " l");
+    cmd("S");
+
+    var notesTop = tableTop + tableH + 12;
+    if (notesTop > pageH - 90) {
+      endPage();
+      notesTop = 36;
+    }
+
+    function drawBlock(title, text) {
+      var lines = [];
+      String(text || "-").split("\n").forEach(function (part) {
+        wrapPdf(part, pageW - margin * 2, 9).forEach(function (line) { lines.push(line); });
+      });
+      if (notesTop + 28 > pageH - 28) {
+        endPage();
+        notesTop = 36;
+      }
+      textAt("F2", 9, margin, notesTop + 10, title, 0.1, 0.12, 0.09);
+      notesTop += 14;
+      lines.forEach(function (line) {
+        if (notesTop + 12 > pageH - 24) {
+          endPage();
+          notesTop = 36;
+        }
+        textAt("F1", 9, margin, notesTop + 9, line, 0.15, 0.13, 0.1);
+        notesTop += 12;
+      });
+      notesTop += 6;
+    }
+
+    var marked = collectIssues();
+    if (marked.length) {
+      var lines = marked.map(function (issue) {
+        var extra = issue.note || issue.reading;
+        return issue.day.label + " " + issue.shift.label + " - " + issue.item.label + (extra ? " - " + extra : "");
+      });
+      drawBlock(marked.length + " marked No", lines.join("\n"));
+    }
+    var sheet = readSheet();
+    drawBlock(isPalletTruck() ? "Comments" : "Remarks", (sheet.remarks || "").trim() || "-");
+    drawBlock("Maintenance required", (sheet.maintenance || "").trim() || "-");
+    endPage();
+    return buildPdfBytes(streams);
+  }
+
+  function pdfFilename() {
+    var truck = currentTruck();
+    return "lift-inspection-" + slug(truck ? truck.name : "truck") + "-" + state.weekStart + ".pdf";
+  }
+
+  function savePdfFile(blob, filename) {
+    var picker = window.showSaveFilePicker;
+    if (typeof picker !== "function") {
+      downloadBlob(blob, filename);
+      noteSaved("PDF downloaded to this computer");
+      return;
+    }
+    var pending;
+    try {
+      pending = picker.call(window, {
+        suggestedName: filename,
+        types: [{ description: "PDF document", accept: { "application/pdf": [".pdf"] } }]
+      });
+    } catch (err) {
+      downloadBlob(blob, filename);
+      noteSaved("PDF downloaded to this computer");
+      return;
+    }
+    pending.then(function (handle) {
+      return handle.createWritable();
+    }).then(function (writable) {
+      return writable.write(blob).then(function () { return writable.close(); });
+    }).then(function () {
+      noteSaved("PDF saved on this computer");
+    }).catch(function (err) {
+      if (err && err.name === "AbortError") return;
+      downloadBlob(blob, filename);
+      noteSaved("PDF downloaded to this computer");
+    });
+  }
+
+  function saveWeekPdf() {
+    if (!currentTruck()) return;
+    var blob = new Blob([buildWeekPdf()], { type: "application/pdf" });
+    savePdfFile(blob, pdfFilename());
+  }
+
+  function downloadWeek() {
+    var truck = currentTruck();
+    if (!truck) return;
+    downloadBlob(new Blob([buildReport()], { type: "text/plain;charset=utf-8" }), "lift-inspection-" + slug(truck.name) + "-" + state.weekStart + ".txt");
   }
 
   function bind() {
@@ -1048,6 +1382,7 @@
     el("mark-all").addEventListener("click", markAllOk);
     el("clear-shift").addEventListener("click", clearShift);
     el("clear-week-btn").addEventListener("click", clearWeek);
+    el("save-pdf-btn").addEventListener("click", saveWeekPdf);
     el("shift-date").addEventListener("change", onDateChange);
     el("shift-initials").addEventListener("input", onInitialsInput);
     el("checklist").addEventListener("click", onChecklistClick);
