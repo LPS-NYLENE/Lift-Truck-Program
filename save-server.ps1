@@ -62,48 +62,38 @@ try {
         Send-Bytes $response 204 ([byte[]]@()) "text/plain"
         continue
       }
+      if (($request.HttpMethod -eq "GET" -or $request.HttpMethod -eq "HEAD") -and $pathOnly -eq "/api/save-excel") {
+        Send-Json $response 200 @{ ok = $true; path = $SavePath }
+        continue
+      }
       if ($request.HttpMethod -eq "POST" -and $pathOnly -eq "/api/save-excel") {
-        if ($request.ContentLength64 -lt 0 -or $request.ContentLength64 -gt $MaxBytes) {
-          Send-Json $response 413 @{ ok = $false; error = "That workbook is too large to save." }
-          continue
-        }
-        $buffer = New-Object byte[] $request.ContentLength64
-        $read = 0
-        while ($read -lt $buffer.Length) {
-          $n = $request.InputStream.Read($buffer, $read, $buffer.Length - $read)
-          if ($n -le 0) { break }
-          $read += $n
-        }
-        if ($read -eq 0) {
+        $stream = New-Object System.IO.MemoryStream
+        $request.InputStream.CopyTo($stream)
+        $buffer = $stream.ToArray()
+        if ($buffer.Length -eq 0) {
           Send-Json $response 400 @{ ok = $false; error = "Could not save an empty workbook." }
           continue
         }
-        if ($read -lt $buffer.Length) {
-          $trimmed = New-Object byte[] $read
-          [Array]::Copy($buffer, $trimmed, $read)
-          $buffer = $trimmed
+        if ($buffer.Length -gt $MaxBytes) {
+          Send-Json $response 413 @{ ok = $false; error = "That workbook is too large to save." }
+          continue
         }
+        $temp = "$SavePath.saving"
         try {
           $dir = Split-Path -Parent $SavePath
-          if (-not (Test-Path -LiteralPath $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-          }
-          $temp = "$SavePath.saving"
+          [System.IO.Directory]::CreateDirectory($dir) | Out-Null
           [System.IO.File]::WriteAllBytes($temp, $buffer)
-          if (Test-Path -LiteralPath $SavePath) {
-            Remove-Item -LiteralPath $SavePath -Force
-          }
-          Move-Item -LiteralPath $temp -Destination $SavePath -Force
+          [System.IO.File]::Copy($temp, $SavePath, $true)
+          Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
           Send-Json $response 200 @{ ok = $true; path = $SavePath }
         } catch {
-          if (Test-Path -LiteralPath "$SavePath.saving") {
-            Remove-Item -LiteralPath "$SavePath.saving" -Force -ErrorAction SilentlyContinue
-          }
+          Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
           $detail = $_.Exception.Message
+          if (-not $detail -and $_.Exception.InnerException) { $detail = $_.Exception.InnerException.Message }
           if ($detail -match "being used by another process" -or $detail -match "used by another") {
             Send-Json $response 423 @{ ok = $false; error = "Excel has that workbook open. Close Nylene consumption sheet.xlsx, then save again." }
           } else {
-            Send-Json $response 500 @{ ok = $false; error = "Could not save to $SavePath. $detail" }
+            Send-Json $response 500 @{ ok = $false; error = "Could not save to ${SavePath}. $detail" }
           }
         }
         continue
@@ -131,7 +121,8 @@ try {
       }
     } catch {
       try {
-        Send-Text $response 500 $_.Exception.Message "text/plain; charset=utf-8"
+        $detail = $_.Exception.Message
+        Send-Json $response 500 @{ ok = $false; error = "Could not save to ${SavePath}. $detail" }
       } catch { }
     }
   }

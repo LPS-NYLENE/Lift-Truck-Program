@@ -102,6 +102,10 @@ var server = http.createServer(function (req, res) {
     res.end();
     return;
   }
+  if ((req.method === "GET" || req.method === "HEAD") && urlPath === "/api/save-excel") {
+    sendJson(res, 200, { ok: true, path: SAVE_PATH });
+    return;
+  }
   if (req.method === "POST" && urlPath === "/api/save-excel") {
     readBody(req).then(function (body) {
       if (!body.length) {
