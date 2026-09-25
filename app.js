@@ -1212,12 +1212,19 @@
 
   function excelDbSet(handle) {
     return excelDb().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(EXCEL_STORE, "readwrite");
-        tx.objectStore(EXCEL_STORE).put(handle, EXCEL_KEY);
+      return settleWithin(new Promise(function (resolve, reject) {
+        var tx;
+        try {
+          tx = db.transaction(EXCEL_STORE, "readwrite");
+          tx.objectStore(EXCEL_STORE).put(handle, EXCEL_KEY);
+        } catch (err) {
+          reject(err);
+          return;
+        }
         tx.oncomplete = function () { resolve(); };
         tx.onerror = function () { reject(tx.error); };
-      });
+        tx.onabort = function () { reject(tx.error || new Error("aborted")); };
+      }), 1500);
     });
   }
 
@@ -1236,13 +1243,40 @@
     });
   }
 
-  function writeExcelHandle(handle, blob) {
-    return handle.createWritable().then(function (writable) {
-      return writable.write(blob).then(function () {
-        return writable.close();
+  function settleWithin(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        resolve();
+      }, ms);
+      promise.then(function (value) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
       }, function (err) {
-        var cancel = typeof writable.abort === "function" ? writable.abort() : writable.close();
-        return Promise.resolve(cancel).then(function () { throw err; }, function () { throw err; });
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  function writeExcelHandle(handle, blob) {
+    return blob.arrayBuffer().then(function (buffer) {
+      return handle.createWritable().then(function (writable) {
+        var bytes = new Uint8Array(buffer);
+        var done = writable.write(bytes).then(function () {
+          return writable.close();
+        }, function (err) {
+          var cancel = typeof writable.abort === "function" ? writable.abort() : writable.close();
+          return Promise.resolve(cancel).then(function () { throw err; }, function () { throw err; });
+        });
+        // Chrome on some desktops writes the file, then never resolves close().
+        return settleWithin(done, 1500);
       });
     });
   }
@@ -1316,7 +1350,7 @@
     var pending = !forcePick && usableExcelHandle(excelHandle)
       ? Promise.resolve(excelHandle)
       : chooseExcelFile();
-    setExcelStatus("Saving the workbook…", "");
+    setExcelStatus("Writing the Excel file…", "");
     pending.then(function (handle) {
       return saveToHandle(handle, blob, !forcePick);
     }).then(function (handle) {
