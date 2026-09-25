@@ -1156,11 +1156,45 @@
     return window.LiftExcel.build(buildExcelModel());
   }
 
+  var excelSaveStarted = false;
+
   function excelSaveUrl() {
-    if (location.protocol === "http:" || location.protocol === "https:") {
-      return new URL("/api/save-excel", location.href).href;
-    }
     return "http://127.0.0.1:" + EXCEL_SAVE_PORT + "/api/save-excel";
+  }
+
+  function excelOfflineMessage() {
+    return "Could not save to " + EXCEL_PATH + ". Double-click Start Inspection Sheet.bat and leave that window open, then click Save Excel again.";
+  }
+
+  function isOfflineError(message) {
+    return !message || /failed to fetch|networkerror|load failed|network request failed|fetch resource/i.test(message);
+  }
+
+  function readSaveResponse(response) {
+    return response.text().then(function (text) {
+      var data = {};
+      if (text) {
+        try { data = JSON.parse(text); } catch (err) { data = {}; }
+      }
+      if (!response.ok || data.ok === false) {
+        var detail = data.error || String(text || "").replace(/\s+/g, " ").trim();
+        if (detail.length > 280) detail = detail.slice(0, 280);
+        throw new Error(detail || ("Could not save to " + EXCEL_PATH + "."));
+      }
+      return data;
+    });
+  }
+
+  function checkExcelSaver() {
+    fetch(excelSaveUrl(), { method: "GET" }).then(function (response) {
+      return response.json();
+    }).then(function (data) {
+      if (excelSaveStarted || !data || !data.ok) return;
+      setExcelStatus("Save Excel writes one sheet per truck straight into " + (data.path || EXCEL_PATH) + ".", "");
+    }).catch(function () {
+      if (excelSaveStarted) return;
+      setExcelStatus(excelOfflineMessage(), "error");
+    });
   }
 
   function saveExcel() {
@@ -1171,27 +1205,17 @@
       setExcelStatus("Could not build the Excel file.", "error");
       return;
     }
+    excelSaveStarted = true;
     setExcelStatus("Saving to " + EXCEL_PATH + "…", "");
     fetch(excelSaveUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
       body: bytes
-    }).then(function (response) {
-      return response.text().then(function (text) {
-        var data = {};
-        if (text) {
-          try { data = JSON.parse(text); } catch (err) { data = {}; }
-        }
-        if (!response.ok || data.ok === false) {
-          throw new Error(data.error || "Could not save to " + EXCEL_PATH + ".");
-        }
-        setExcelStatus("Saved to " + (data.path || EXCEL_PATH) + ". Each truck has its own sheet.", "saved");
-      });
+    }).then(readSaveResponse).then(function (data) {
+      setExcelStatus("Saved to " + (data.path || EXCEL_PATH) + ". Each truck has its own sheet.", "saved");
     }).catch(function (err) {
       var message = err && err.message ? err.message : "";
-      if (!message || message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource.") {
-        message = "Could not save to " + EXCEL_PATH + ". Open this sheet with Start Inspection Sheet.bat on this computer, then click Save Excel again.";
-      }
+      if (isOfflineError(message)) message = excelOfflineMessage();
       setExcelStatus(message, "error");
     });
   }
@@ -1269,6 +1293,7 @@
     bind();
     renderAll();
     save();
+    checkExcelSaver();
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible") watchCalendarDay();
     });
