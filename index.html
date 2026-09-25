@@ -19,11 +19,12 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <p class="eyebrow">Lift truck pre-use check</p>
-      <h1>NYLENE Daily Lift Truck Inspection Sheet</h1>
+      <p class="eyebrow">Lift truck pre-use check.</p>
+      <h1>NYLENE Daily Lift Truck Inspection Sheet.</h1>
     </div>
     <div class="top-actions no-print">
-      <span id="save-state" class="save-state">Saved on this device</span>
+      <!-- <span id="save-state" class="save-state">Saved on this device</span> -->
+      <button type="button" id="excel-btn" class="btn green">Save Excel</button>
       <button type="button" id="download-btn" class="btn on-dark">Download week</button>
       <button type="button" id="print-btn" class="btn on-dark">Print sheet</button>
     </div>
@@ -46,12 +47,14 @@
     </div>
   </div>
 
+  <p id="excel-status" class="excel-bar no-print">Save Excel writes one sheet per truck straight into G:\Installed Software\1 Temp\1 Temp\Cool Room Consumption Folder\Nylene consumption sheet.xlsx.</p>
+
   <p id="print-meta" class="print-only"></p>
 
   <div id="workspace" class="layout" hidden>
     <div class="view-tabs no-print" aria-label="View">
-      <button type="button" id="tab-inspect" class="btn ghost" aria-pressed="true">This shift</button>
-      <button type="button" id="tab-sheet" class="btn ghost" aria-pressed="false">Full week</button>
+      <button type="button" id="tab-inspect" class="btn ghost" aria-pressed="true">This shift.</button>
+      <button type="button" id="tab-sheet" class="btn ghost" aria-pressed="false">Full week.</button>
     </div>
 
     <section class="inspector" id="inspect-panel" aria-label="Shift inspection">
@@ -119,6 +122,7 @@
 
   <footer class="foot no-print">Records stay in this browser. Save as PDF keeps a copy in a folder on this computer.</footer>
   <noscript><p class="empty">This inspection sheet needs JavaScript turned on.</p></noscript>
+  <script src="excel.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

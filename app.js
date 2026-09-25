@@ -133,14 +133,19 @@
     return (d.getMonth() + 1) + "/" + d.getDate();
   }
 
-  function weekRangeLabel() {
-    var start = parseISO(state.weekStart);
+  function weekRangeLabelFor(weekStart) {
+    var start = parseISO(weekStart);
     var end = addDays(start, 6);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return String(weekStart || "");
     var endText = MONTHS[end.getMonth()] + " " + end.getDate() + ", " + end.getFullYear();
     if (start.getFullYear() !== end.getFullYear()) {
       return MONTHS[start.getMonth()] + " " + start.getDate() + ", " + start.getFullYear() + " – " + endText;
     }
     return MONTHS[start.getMonth()] + " " + start.getDate() + " – " + endText;
+  }
+
+  function weekRangeLabel() {
+    return weekRangeLabelFor(state.weekStart);
   }
 
   function esc(value) {
@@ -581,8 +586,123 @@
   }
 
   function statusButton(value, label, current, locked) {
-    var pressed = current === value ? "true" : "false";
-    return '<button type="button" data-set="' + value + '" aria-pressed="' + pressed + '"' + (locked ? " disabled" : "") + ">" + label + "</button>";
+    var pressed = current === value;
+    return '<button type="button" data-set="' + value + '" aria-pressed="' + (pressed ? "true" : "false") + '"' +
+      (pressed ? ' class="is-selected"' : "") + (locked ? " disabled" : "") + ">" + label + "</button>";
+  }
+
+  function itemSymbol(rec) {
+    if (rec.reading) return rec.reading;
+    if (rec.status === "ok") return "Y";
+    if (rec.status === "issue") return "N";
+    if (rec.status === "na") return "–";
+    return "";
+  }
+
+  function findByData(nodes, itemId) {
+    for (var i = 0; i < nodes.length; i += 1) {
+      if (nodes[i].dataset.item === itemId) return nodes[i];
+    }
+    return null;
+  }
+
+  function showItemCheck(day, shiftName, itemId, rec) {
+    if (day === state.day && shiftName === state.shift) {
+      var row = findByData(document.querySelectorAll("#checklist .check-row"), itemId);
+      if (row) {
+        row.classList.remove("is-ok", "is-issue", "is-na");
+        if (rec.status) row.classList.add("is-" + rec.status);
+        var buttons = row.querySelectorAll("button[data-set]");
+        for (var i = 0; i < buttons.length; i += 1) {
+          var on = buttons[i].getAttribute("data-set") === rec.status;
+          buttons[i].setAttribute("aria-pressed", on ? "true" : "false");
+          buttons[i].classList.toggle("is-selected", on);
+        }
+        syncNoteField(row, itemId, rec);
+      }
+    }
+    var cells = document.querySelectorAll("#sheet-wrap button.cell");
+    var cell = null;
+    for (var c = 0; c < cells.length; c += 1) {
+      if (cells[c].dataset.item === itemId && cells[c].dataset.day === day && cells[c].dataset.shift === shiftName) {
+        cell = cells[c];
+        break;
+      }
+    }
+    if (cell) {
+      var open = isLiveDay(day);
+      var classes = ["cell"];
+      if (rec.status) classes.push(rec.status);
+      if (rec.note) classes.push("has-note");
+      if (rec.reading) classes.push("has-reading");
+      classes.push(open ? "is-open" : "is-locked");
+      cell.className = classes.join(" ");
+      cell.textContent = itemSymbol(rec);
+      if (cell.disabled !== !open) cell.disabled = !open;
+      var item = null;
+      var items = currentItems();
+      for (var n = 0; n < items.length; n += 1) {
+        if (items[n].id === itemId) item = items[n];
+      }
+      var dayMeta = null;
+      for (var d = 0; d < DAYS.length; d += 1) {
+        if (DAYS[d].id === day) dayMeta = DAYS[d];
+      }
+      var shiftMeta = null;
+      for (var s = 0; s < SHIFTS.length; s += 1) {
+        if (SHIFTS[s].id === shiftName) shiftMeta = SHIFTS[s];
+      }
+      var statusText = rec.status === "ok" ? "Yes" : rec.status === "issue" ? "No" : rec.status === "na" ? "N/A" : "Not checked";
+      var bits = [item ? item.label : itemId, dayMeta ? dayMeta.label : day, shiftMeta ? shiftMeta.label : shiftName, statusText];
+      if (rec.reading) bits.push(rec.reading);
+      if (rec.note) bits.push(rec.note);
+      if (!open) bits.push("View only");
+      cell.title = bits.join(" · ");
+      cell.setAttribute("aria-label", bits.join(", "));
+    }
+    var metas = document.querySelectorAll("#sheet-wrap button[data-meta]");
+    var data = readShift(day, shiftName);
+    for (var m = 0; m < metas.length; m += 1) {
+      if (metas[m].dataset.day !== day || metas[m].dataset.shift !== shiftName) continue;
+      if (metas[m].dataset.meta === "date") metas[m].textContent = data && data.date ? formatMd(data.date) : "";
+      if (metas[m].dataset.meta === "initials") metas[m].textContent = data && data.initials ? data.initials : "";
+    }
+    renderChrome();
+    renderShiftStrip();
+    renderShiftHeader();
+    renderIssueLog();
+  }
+
+  function syncNoteField(row, itemId, rec) {
+    var existing = null;
+    var inputs = row.querySelectorAll("input[data-note]");
+    if (inputs.length) existing = inputs[0];
+    if (rec.status !== "issue") {
+      if (existing) {
+        var label = existing.closest("label");
+        if (label) label.remove();
+        else existing.remove();
+      }
+      return;
+    }
+    if (existing) {
+      if (document.activeElement !== existing) existing.value = rec.note || "";
+      return;
+    }
+    var wrap = document.createElement("label");
+    wrap.className = "inline-field";
+    var span = document.createElement("span");
+    span.textContent = "Note";
+    var input = document.createElement("input");
+    input.type = "text";
+    input.setAttribute("data-note", itemId);
+    input.maxLength = 180;
+    input.placeholder = "What needs attention?";
+    input.value = rec.note || "";
+    if (row.classList.contains("is-locked")) input.disabled = true;
+    wrap.appendChild(span);
+    wrap.appendChild(input);
+    row.appendChild(wrap);
   }
 
   function renderChecklist() {
@@ -641,7 +761,7 @@
           var data = readShift(day.id, shift.id);
           var rec = getItem(data, item.id);
           var open = isLiveDay(day.id);
-          var symbol = rec.reading ? rec.reading : rec.status === "ok" ? "Y" : rec.status === "issue" ? "N" : rec.status === "na" ? "–" : "";
+          var symbol = itemSymbol(rec);
           var statusText = rec.status === "ok" ? "Yes" : rec.status === "issue" ? "No" : rec.status === "na" ? "N/A" : "Not checked";
           var bits = [item.label, day.label, shift.label, statusText];
           if (rec.reading) bits.push(rec.reading);
@@ -649,7 +769,7 @@
           if (!open) bits.push("View only");
           var cellClass = ["cell", rec.status, rec.note ? "has-note" : "", rec.reading ? "has-reading" : "", open ? "is-open" : "is-locked"].filter(Boolean).join(" ");
           parts.push(
-            '<td class="' + columnClass(day, shift) + '"><button type="button" class="' + cellClass + '"' + (open ? "" : " disabled") + ' data-item="' + item.id + '" data-day="' + day.id + '" data-shift="' + shift.id + '" title="' + esc(bits.join(" · ")) + '" aria-label="' + esc(bits.join(", ")) + '">' + symbol + "</button></td>"
+            '<td class="' + columnClass(day, shift) + '"><button type="button" class="' + cellClass + '"' + (open ? "" : " disabled") + ' data-item="' + item.id + '" data-day="' + day.id + '" data-shift="' + shift.id + '" title="' + esc(bits.join(" · ")) + '" aria-label="' + esc(bits.join(", ")) + '">' + esc(symbol) + "</button></td>"
           );
         });
       });
@@ -667,7 +787,7 @@
           if (meta.key === "date") text = data && data.date ? formatMd(data.date) : "";
           if (meta.key === "initials") text = data && data.initials ? data.initials : "";
           parts.push(
-            '<td class="' + columnClass(day, shift) + '"><button type="button" class="meta-btn" data-open-shift data-day="' + day.id + '" data-shift="' + shift.id + '" aria-label="Open ' + esc(day.label + " " + shift.label) + '">' + esc(text) + "</button></td>"
+            '<td class="' + columnClass(day, shift) + '"><button type="button" class="meta-btn" data-open-shift data-meta="' + meta.key + '" data-day="' + day.id + '" data-shift="' + shift.id + '" aria-label="Open ' + esc(day.label + " " + shift.label) + '">' + esc(text) + "</button></td>"
           );
         });
       });
@@ -746,7 +866,10 @@
   function setItemStatus(itemId, status) {
     if (!isLiveDay(state.day)) return;
     var prev = getItem(readShift(), itemId);
-    if (prev.status === status) return;
+    if (prev.status === status) {
+      showItemCheck(state.day, state.shift, itemId, prev);
+      return;
+    }
     var shift = ensureShift();
     writeItem(shift, itemId, {
       status: status,
@@ -755,11 +878,8 @@
     });
     if (!shift.date) shift.date = dateForDay(state.day);
     save();
-    renderChecks();
-    if (status === "issue") {
-      var note = document.querySelector('[data-note="' + itemId + '"]');
-      if (note) note.focus();
-    }
+    showItemCheck(state.day, state.shift, itemId, getItem(shift, itemId));
+    if (status === "issue") focusItemNote(itemId);
   }
 
   function cycleCell(day, shiftName, itemId) {
@@ -778,11 +898,18 @@
     if ((nextStatus || prev.reading) && !shift.date) shift.date = dateForDay(day);
     pruneShift(day, shiftName);
     save();
-    renderChecks();
+    showItemCheck(day, shiftName, itemId, getItem(shift, itemId));
     var inspectVisible = window.matchMedia("(min-width: 1040px)").matches || state.tab === "inspect";
-    if (nextStatus === "issue" && day === state.day && shiftName === state.shift && inspectVisible) {
-      var note = document.querySelector('[data-note="' + itemId + '"]');
-      if (note) note.focus();
+    if (nextStatus === "issue" && day === state.day && shiftName === state.shift && inspectVisible) focusItemNote(itemId);
+  }
+
+  function focusItemNote(itemId) {
+    var notes = document.querySelectorAll("#checklist input[data-note]");
+    for (var i = 0; i < notes.length; i += 1) {
+      if (notes[i].getAttribute("data-note") === itemId) {
+        notes[i].focus();
+        return;
+      }
     }
   }
 
@@ -1379,6 +1506,7 @@
     });
     el("print-btn").addEventListener("click", function () { window.print(); });
     el("download-btn").addEventListener("click", downloadWeek);
+    el("excel-btn").addEventListener("click", saveExcel);
     el("mark-all").addEventListener("click", markAllOk);
     el("clear-shift").addEventListener("click", clearShift);
     el("clear-week-btn").addEventListener("click", clearWeek);
@@ -1409,6 +1537,7 @@
     bind();
     renderAll();
     save();
+    checkExcelSaver();
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible") watchCalendarDay();
     });
